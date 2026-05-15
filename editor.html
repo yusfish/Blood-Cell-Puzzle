@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>血球拼圖｜題庫編輯器</title>
+
+<!--
+  editor.html — 題庫編輯器
+  使用方式：
+    1. 用瀏覽器直接開啟此檔（雙擊即可）
+    2. 新增／編輯題目
+    3. 按「匯出 questions.js」→ 下載檔案
+    4. 將下載的 questions.js 覆蓋遊戲資料夾中的舊檔
+    5. 重新整理 game.html，題庫即更新
+
+  依賴：parts.js（放在同一資料夾）
+-->
+<script src="parts.js"></script>
+
+<style>
+/* ══════════════════════════════════════════════
+   RESET & TOKENS
+   ══════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #1A1512;
+  --bg2:       #231E1A;
+  --bg3:       #2C2520;
+  --border:    rgba(255,200,100,0.12);
+  --border-hi: rgba(255,200,100,0.35);
+  --gold:      #C8902A;
+  --gold-lt:   #E8B84A;
+  --text:      #EEE0C8;
+  --text-dim:  rgba(238,224,200,0.50);
+  --text-dim2: rgba(238,224,200,0.30);
+  --accent:    #3A7028;
+  --danger:    #7A2828;
+  --radius:    10px;
+  --font:      'Helvetica Neue','PingFang TC','Microsoft JhengHei',sans-serif;
+}
+
+body {
+  background: var(--bg); color: var(--text);
+  font-family: var(--font); font-size: 14px;
+  min-height: 100vh; display: flex; flex-direction: column;
+}
+
+/* ══════════════════════════════════════════════
+   LAYOUT
+   ══════════════════════════════════════════════ */
+header {
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  padding: 14px 24px; display: flex; align-items: center;
+  justify-content: space-between; gap: 16px; flex-shrink: 0;
+}
+header h1 {
+  font-size: 17px; font-weight: 600; color: var(--gold-lt);
+  letter-spacing: 0.5px; display: flex; align-items: center; gap: 10px;
+}
+header h1 span { font-size: 22px; }
+
+.header-actions { display: flex; gap: 10px; align-items: center; }
+
+.main {
+  flex: 1; display: grid;
+  grid-template-columns: 240px 1fr 280px;
+  gap: 0; overflow: hidden; height: calc(100vh - 57px);
+}
+
+/* ══════════════════════════════════════════════
+   LEFT — QUESTION LIST
+   ══════════════════════════════════════════════ */
+.panel-left {
+  background: var(--bg2); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.panel-left-header {
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.panel-left-header h2 { font-size: 13px; color: var(--text-dim); font-weight: 500; letter-spacing: 0.5px; }
+
+#q-list {
+  flex: 1; overflow-y: auto; padding: 8px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+#q-list::-webkit-scrollbar { width: 4px; }
+#q-list::-webkit-scrollbar-track { background: transparent; }
+#q-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+.q-item {
+  padding: 10px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent; transition: all 0.15s;
+  display: flex; flex-direction: column; gap: 3px; position: relative;
+}
+.q-item:hover { background: var(--bg3); border-color: var(--border); }
+.q-item.active { background: rgba(200,144,42,0.14); border-color: rgba(200,144,42,0.40); }
+.q-item-name { font-size: 14px; font-weight: 500; color: var(--text); }
+.q-item-sub  { font-size: 11px; color: var(--text-dim); font-style: italic; }
+.q-item-diff { font-size: 10px; color: var(--text-dim2); margin-top: 1px; }
+.q-item-del  {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: rgba(200,80,80,0.45);
+  cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 4px;
+  line-height: 1; transition: color 0.15s; display: none;
+}
+.q-item:hover .q-item-del { display: block; }
+.q-item-del:hover { color: rgba(220,80,80,0.9); }
+
+/* ══════════════════════════════════════════════
+   CENTRE — EDIT FORM
+   ══════════════════════════════════════════════ */
+.panel-centre {
+  overflow-y: auto; padding: 24px 28px;
+  display: flex; flex-direction: column; gap: 0;
+}
+.panel-centre::-webkit-scrollbar { width: 5px; }
+.panel-centre::-webkit-scrollbar-track { background: transparent; }
+.panel-centre::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 3px; }
+
+.empty-state {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px;
+  color: var(--text-dim2); text-align: center;
+}
+.empty-state .icon { font-size: 48px; opacity: 0.4; }
+.empty-state p { font-size: 14px; line-height: 1.7; }
+
+.edit-form { display: flex; flex-direction: column; gap: 20px; }
+
+.form-section {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.form-section-title {
+  padding: 10px 16px; background: rgba(255,200,80,0.06);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px; font-weight: 600; color: var(--gold);
+  letter-spacing: 0.8px; text-transform: uppercase;
+}
+.form-grid {
+  padding: 16px; display: grid;
+  grid-template-columns: 1fr 1fr; gap: 14px;
+}
+.form-grid.single { grid-template-columns: 1fr; }
+.form-grid.triple { grid-template-columns: 1fr 1fr 1fr; }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label {
+  font-size: 12px; color: var(--text-dim);
+  letter-spacing: 0.3px; font-weight: 500;
+}
+.field label .layer-badge {
+  display: inline-block; font-size: 10px; padding: 1px 7px;
+  border-radius: 10px; margin-left: 6px; font-weight: 400;
+  background: rgba(255,200,80,0.10); color: var(--gold-lt);
+  border: 1px solid rgba(255,200,80,0.20);
+}
+
+input[type="text"], textarea, select {
+  background: var(--bg3); border: 1px solid var(--border);
+  color: var(--text); border-radius: 7px; font-family: var(--font);
+  font-size: 14px; padding: 9px 12px; transition: border-color 0.15s;
+  width: 100%;
+}
+input[type="text"]:focus,
+textarea:focus,
+select:focus {
+  outline: none; border-color: var(--border-hi);
+}
+textarea { resize: vertical; min-height: 80px; line-height: 1.6; }
+select { cursor: pointer; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23C8902A' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center;
+  padding-right: 34px;
+}
+select option { background: var(--bg3); }
+
+/* Part preview in select */
+.layer-row {
+  display: grid; grid-template-columns: auto 1fr; gap: 0;
+  align-items: center;
+}
+.layer-preview-cell {
+  width: 48px; display: flex; align-items: center; justify-content: center;
+}
+.layer-preview-cell canvas { border-radius: 50%; display: block; }
+
+/* Diff buttons */
+.diff-group { display: flex; gap: 8px; }
+.diff-opt {
+  flex: 1; padding: 8px 4px; text-align: center; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg3); color: var(--text-dim); font-size: 13px;
+  transition: all 0.15s; user-select: none;
+}
+.diff-opt.active {
+  background: rgba(200,144,42,0.22); color: var(--gold-lt);
+  border-color: rgba(200,144,42,0.45);
+}
+
+/* ══════════════════════════════════════════════
+   RIGHT — LIVE PREVIEW
+   ══════════════════════════════════════════════ */
+.panel-right {
+  background: var(--bg2); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.panel-right-header {
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+}
+.panel-right-header h2 { font-size: 13px; color: var(--text-dim); font-weight: 500; letter-spacing: 0.5px; }
+
+.preview-area {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 20px; gap: 16px;
+}
+#preview-canvas {
+  border-radius: 50%;
+  box-shadow: 0 0 32px rgba(0,0,0,0.5), 0 0 60px rgba(200,144,42,0.08);
+  display: block;
+}
+#preview-name { font-size: 16px; font-weight: 500; color: var(--text); text-align: center; }
+#preview-sub  { font-size: 12px; color: var(--text-dim); font-style: italic; text-align: center; margin-top: -10px; }
+
+.preview-layers {
+  width: 100%; padding: 0 8px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.preview-layer-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 5px 10px; border-radius: 6px; background: var(--bg3);
+  border: 1px solid var(--border);
+}
+.preview-layer-name { font-size: 12px; color: var(--text-dim); }
+.preview-layer-val  { font-size: 12px; color: var(--gold-lt); font-weight: 500; }
+
+/* ══════════════════════════════════════════════
+   BUTTONS
+   ══════════════════════════════════════════════ */
+.btn {
+  padding: 9px 20px; border-radius: 22px; font-size: 14px; font-weight: 500;
+  cursor: pointer; border: 1px solid; transition: all 0.15s;
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+}
+.btn-primary {
+  background: rgba(58,112,40,0.85); color: #C8F0C0;
+  border-color: rgba(80,160,60,0.55);
+}
+.btn-primary:hover { background: rgba(58,112,40,1); }
+.btn-gold {
+  background: rgba(200,144,42,0.20); color: var(--gold-lt);
+  border-color: rgba(200,144,42,0.45);
+}
+.btn-gold:hover { background: rgba(200,144,42,0.35); }
+.btn-ghost {
+  background: transparent; color: var(--text-dim);
+  border-color: var(--border);
+}
+.btn-ghost:hover { background: var(--bg3); color: var(--text); }
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+
+/* ══════════════════════════════════════════════
+   TOAST
+   ══════════════════════════════════════════════ */
+#toast {
+  position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: rgba(40,60,30,0.96); color: #B8F0A0;
+  padding: 10px 24px; border-radius: 22px; font-size: 14px;
+  border: 1px solid rgba(80,160,60,0.45);
+  opacity: 0; pointer-events: none; transition: all 0.25s; z-index: 9999;
+  backdrop-filter: blur(6px);
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ══════════════════════════════════════════════
+   MODAL — Import / Help
+   ══════════════════════════════════════════════ */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+  z-index: 8000; display: none; align-items: center; justify-content: center;
+  backdrop-filter: blur(3px);
+}
+.modal-backdrop.show { display: flex; }
+.modal {
+  background: var(--bg2); border: 1px solid var(--border-hi);
+  border-radius: 14px; padding: 28px; width: 480px; max-width: 90vw;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.modal h3 { font-size: 16px; color: var(--gold-lt); }
+.modal p  { font-size: 14px; color: var(--text-dim); line-height: 1.7; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+/* ── 匯入拖放區 ── */
+#import-drop-zone {
+  border: 2px dashed var(--border-hi); border-radius: 10px;
+  padding: 32px 20px; text-align: center; cursor: pointer;
+  background: var(--bg3); transition: all 0.15s;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+#import-drop-zone:hover,
+#import-drop-zone.drag-over {
+  border-color: var(--gold-lt);
+  background: rgba(200,144,42,0.10);
+}
+.drop-icon { font-size: 36px; }
+.drop-text { font-size: 14px; color: var(--text); }
+.drop-hint { font-size: 12px; color: var(--text-dim2); }
+#import-file-name {
+  font-size: 13px; color: var(--gold-lt);
+  min-height: 20px; text-align: center; margin-top: 4px;
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════ HEADER ══════════════ -->
+<header>
+  <h1><span>🧬</span> 血球拼圖｜題庫編輯器</h1>
+  <div class="header-actions">
+    <button class="btn btn-ghost btn-sm" onclick="showImportModal()">📂 匯入 questions.js</button>
+    <button class="btn btn-gold btn-sm" onclick="showHelp()">❓ 使用說明</button>
+    <button class="btn btn-primary" onclick="exportQuestions()">⬇︎ 匯出 questions.js</button>
+  </div>
+</header>
+
+<!-- ══════════════ MAIN ══════════════ -->
+<div class="main">
+
+  <!-- LEFT: Question List -->
+  <div class="panel-left">
+    <div class="panel-left-header">
+      <h2>題目列表</h2>
+      <button class="btn btn-gold btn-sm" onclick="addQuestion()">＋ 新增題目</button>
+    </div>
+    <div id="q-list"></div>
+  </div>
+
+  <!-- CENTRE: Edit Form -->
+  <div class="panel-centre" id="panel-centre">
+    <div class="empty-state" id="empty-state">
+      <div class="icon">🩸</div>
+      <p>從左側選擇一道題目開始編輯<br>或按「＋ 新增題目」建立新題</p>
+    </div>
+    <div class="edit-form" id="edit-form" style="display:none;">
+
+      <!-- 基本資訊 -->
+      <div class="form-section">
+        <div class="form-section-title">基本資訊</div>
+        <div class="form-grid">
+          <div class="field">
+            <label>中文名稱</label>
+            <input type="text" id="f-text" placeholder="例：分葉核嗜中性球" oninput="syncField('text',this.value)">
+          </div>
+          <div class="field">
+            <label>英文名稱</label>
+            <input type="text" id="f-sub" placeholder="例：Segmented neutrophil" oninput="syncField('sub',this.value)">
+          </div>
+          <div class="field" style="grid-column:1/-1;">
+            <label>難度</label>
+            <div class="diff-group" id="diff-group">
+              <div class="diff-opt active" data-diff="1" onclick="setQDiff(1)">⭐ 初級</div>
+              <div class="diff-opt"        data-diff="2" onclick="setQDiff(2)">⭐⭐ 中級</div>
+              <div class="diff-opt"        data-diff="3" onclick="setQDiff(3)">⭐⭐⭐ 困難</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 零件組合 -->
+      <div class="form-section">
+        <div class="form-section-title">零件組合（答案）</div>
+        <div class="form-grid" id="layer-selects">
+          <!-- 由 JS 產生 -->
+        </div>
+      </div>
+
+      <!-- 提示文字 -->
+      <div class="form-section">
+        <div class="form-section-title">形態學提示</div>
+        <div class="form-grid single">
+          <div class="field">
+            <label>答對後顯示的說明文字</label>
+            <textarea id="f-hint" placeholder="描述這種細胞的形態學特徵…" oninput="syncField('hint',this.value)"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- 照片 -->
+      <div class="form-section">
+        <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>真實顯微鏡照片</span>
+          <button class="btn btn-gold btn-sm" onclick="addPhotoRow()" style="font-size:12px;padding:4px 12px;">＋ 新增照片</button>
+        </div>
+        <div id="photos-list" style="padding:12px 16px;display:flex;flex-direction:column;gap:10px;">
+          <!-- 由 JS 動態產生 -->
+        </div>
+        <div style="padding:4px 16px 12px;font-size:11px;color:var(--text-dim2);">
+          路徑相對於 game.html，例：photos/neutrophil-1.jpg
+        </div>
+      </div>
+
+    </div><!-- /.edit-form -->
+  </div><!-- /.panel-centre -->
+
+  <!-- RIGHT: Live Preview -->
+  <div class="panel-right">
+    <div class="panel-right-header">
+      <h2>即時預覽</h2>
+    </div>
+    <div class="preview-area">
+      <canvas id="preview-canvas" width="220" height="220"></canvas>
+      <div id="preview-name">—</div>
+      <div id="preview-sub"></div>
+      <div class="preview-layers" id="preview-layers"></div>
+    </div>
+  </div>
+
+</div><!-- /.main -->
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- IMPORT MODAL -->
+<div class="modal-backdrop" id="import-modal">
+  <div class="modal">
+    <h3>📂 匯入 questions.js</h3>
+    <p>選擇你的 <code>questions.js</code> 檔案，即可載入題庫繼續編輯。</p>
+    <div id="import-drop-zone">
+      <div class="drop-icon">📄</div>
+      <div class="drop-text">點擊選擇檔案，或將 questions.js 拖曳至此</div>
+      <div class="drop-hint">僅接受 .js 檔案</div>
+      <input type="file" id="import-file-input" accept=".js" style="display:none;">
+    </div>
+    <div id="import-file-name"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeImportModal()">取消</button>
+      <button class="btn btn-primary" id="import-confirm-btn" onclick="doImport()" disabled>匯入</button>
+    </div>
+  </div>
+</div>
+
+<!-- HELP MODAL -->
+<div class="modal-backdrop" id="help-modal">
+  <div class="modal">
+    <h3>❓ 使用說明</h3>
+    <p>
+      <b>基本流程：</b><br>
+      ① 按「＋ 新增題目」建立一道題<br>
+      ② 填寫名稱、選擇各層零件、輸入說明<br>
+      ③ 右側即時預覽合成效果<br>
+      ④ 按「匯出 questions.js」下載檔案<br>
+      ⑤ 將下載的檔案覆蓋遊戲資料夾的舊檔<br>
+      ⑥ 重新整理 game.html，更新完成！<br><br>
+      <b>照片設定：</b><br>
+      將圖片（JPG/PNG）放入 <code>photos/</code> 資料夾，<br>
+      路徑填寫 <code>photos/檔名.jpg</code> 即可。<br><br>
+      <b>零件圖片：</b><br>
+      將 AI 生成的 PNG 放入對應資料夾（<code>parts/body/B01.png</code> 等），<br>
+      遊戲會自動優先使用圖片；圖片不存在時退回程式繪製。
+    </p>
+    <div class="modal-actions">
+      <button class="btn btn-gold" onclick="document.getElementById('help-modal').classList.remove('show')">了解了</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════
+   STATE
+   ══════════════════════════════════════════════════════════ */
+const LAYER_ORDER = ['body','cyto','nucleus','nucleolus','inclusion'];
+const LAYER_NAMES = { body:'細胞體', cyto:'細胞質', nucleus:'細胞核', nucleolus:'核仁', inclusion:'包含體' };
+
+// Default question template
+function newQ() {
+  return {
+    text: '新細胞', sub: 'New cell', diff: 1,
+    answer: { body:'B02', cyto:'C03', nucleus:'N05', nucleolus:'NU0', inclusion:'I00' },
+    hint: '',
+    photos: [],
+  };
+}
+
+// Working question bank (clone from questions.js if loaded, else default)
+let bank = [];
+try {
+  if (typeof QUESTIONS !== 'undefined' && Array.isArray(QUESTIONS) && QUESTIONS.length) {
+    bank = JSON.parse(JSON.stringify(QUESTIONS));
+  } else {
+    bank = [newQ()];
+  }
+} catch(e) {
+  bank = [newQ()];
+}
+
+let activeIdx = 0; // currently selected question index
+
+/* ══════════════════════════════════════════════════════════
+   SEED RNG (same as game)
+   ══════════════════════════════════════════════════════════ */
+const seed = s => { let x=s+1; return ()=>{ x=Math.sin(x*127.1+311.7)*43758.5453; return x-Math.floor(x); }; };
+
+/* ══════════════════════════════════════════════════════════
+   CANVAS DRAWING (mirrors game.html)
+   ══════════════════════════════════════════════════════════ */
+function sG(ctx,cx,cy,cr,n,gr,cols,rng){
+  for(let i=0;i<n;i++){
+    const a=rng()*Math.PI*2,d=rng()*cr*0.84;
+    const gx=cx+Math.cos(a)*d,gy=cy+Math.sin(a)*d;
+    const g2=ctx.createRadialGradient(gx-gr*0.3,gy-gr*0.3,0.5,gx,gy,gr);
+    g2.addColorStop(0,cols[0]);g2.addColorStop(1,cols[1]);
+    ctx.beginPath();ctx.arc(gx,gy,gr*(0.75+rng()*0.5),0,Math.PI*2);
+    ctx.fillStyle=g2;ctx.globalAlpha=0.68+rng()*0.3;ctx.fill();
+  }ctx.globalAlpha=1;
+}
+function dN(ctx,cx,cy,r,light){
+  const g=ctx.createRadialGradient(cx-r*0.28,cy-r*0.32,r*0.05,cx,cy,r);
+  g.addColorStop(0,light?'#AEA0DC':'#7B68BE');g.addColorStop(1,light?'#7055B0':'#3E2880');
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+  ctx.strokeStyle=light?'#8870C8':'#2C1868';ctx.lineWidth=1.1;ctx.stroke();
+  const nh=ctx.createRadialGradient(cx-r*0.25,cy-r*0.3,0.5,cx,cy,r*0.55);
+  nh.addColorStop(0,'rgba(255,255,255,0.32)');nh.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=nh;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
+}
+function dBand(ctx,cx,cy,cr){
+  const g=ctx.createRadialGradient(cx-cr*0.22,cy-cr*0.1,2,cx,cy,cr*0.45);
+  g.addColorStop(0,'#7B68BE');g.addColorStop(1,'#3E2880');
+  ctx.beginPath();
+  ctx.moveTo(cx-cr*0.5,cy-cr*0.05);
+  ctx.bezierCurveTo(cx-cr*0.26,cy-cr*0.26,cx+cr*0.26,cy-cr*0.24,cx+cr*0.5,cy-cr*0.04);
+  ctx.bezierCurveTo(cx+cr*0.44,cy+cr*0.13,cx-cr*0.32,cy+cr*0.18,cx-cr*0.5,cy+cr*0.08);
+  ctx.closePath();ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='#2C1868';ctx.lineWidth=1.1;ctx.stroke();
+}
+function dHorse(ctx,cx,cy,cr){
+  const s=cr*0.013;
+  const g=ctx.createRadialGradient(cx+8*s,cy-18*s,3,cx+12*s,cy,32*s);
+  g.addColorStop(0,'#8878C8');g.addColorStop(1,'#3E2880');
+  ctx.beginPath();
+  ctx.moveTo(cx-10*s,cy+26*s);
+  ctx.bezierCurveTo(cx-30*s,cy+20*s,cx-34*s,cy,cx-24*s,cy-18*s);
+  ctx.bezierCurveTo(cx-14*s,cy-32*s,cx+14*s,cy-34*s,cx+26*s,cy-22*s);
+  ctx.bezierCurveTo(cx+38*s,cy-8*s,cx+34*s,cy+14*s,cx+14*s,cy+26*s);
+  ctx.bezierCurveTo(cx+8*s,cy+28*s,cx,cy+18*s,cx+4*s,cy+10*s);
+  ctx.bezierCurveTo(cx+18*s,cy+6*s,cx+24*s,cy-2*s,cx+20*s,cy-14*s);
+  ctx.bezierCurveTo(cx+12*s,cy-26*s,cx-4*s,cy-26*s,cx-12*s,cy-14*s);
+  ctx.bezierCurveTo(cx-20*s,cy-4*s,cx-18*s,cy+10*s,cx-8*s,cy+18*s);
+  ctx.closePath();ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='#2C1868';ctx.lineWidth=1.1;ctx.stroke();
+}
+
+function drawPartOnCtx(ctx,layer,partId,bodyId,sz){
+  const cx=sz/2,cy=sz/2;
+  const bp=PARTS_DEF.body.find(p=>p.id===bodyId)||PARTS_DEF.body[1];
+  const r=(sz/2-5)*bp.size;
+  if(layer==='body'){
+    const p=PARTS_DEF.body.find(x=>x.id===partId)||bp;
+    const rr=(sz/2-5)*p.size;
+    const g=ctx.createRadialGradient(cx-rr*0.25,cy-rr*0.28,rr*0.05,cx,cy,rr*1.05);
+    g.addColorStop(0,p.col[0]);g.addColorStop(0.55,p.col[1]);g.addColorStop(1,p.col[2]);
+    ctx.beginPath();ctx.arc(cx,cy,rr,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    ctx.strokeStyle=p.edge;ctx.lineWidth=1.8;ctx.stroke();
+    const inner=ctx.createRadialGradient(cx,cy,rr*0.1,cx,cy,rr*0.46);
+    inner.addColorStop(0,'rgba(255,252,248,0.6)');inner.addColorStop(1,'rgba(255,238,230,0)');
+    ctx.beginPath();ctx.arc(cx,cy,rr*0.46,0,Math.PI*2);ctx.fillStyle=inner;ctx.fill();
+  } else if(layer==='cyto'){
+    const cp=PARTS_DEF.cyto.find(x=>x.id===partId);if(!cp)return;
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+    const rng=seed(partId.charCodeAt(1)*37+17);
+    if(cp.type==='neutro'){sG(ctx,cx,cy,r,80,3.0,['#DDA8C0','#BE80A0'],rng);}
+    else if(cp.type==='eosino'){sG(ctx,cx,cy,r,30,6.0,['#F09060','#C85830'],rng);}
+    else if(cp.type==='baso'){sG(ctx,cx,cy,r,22,7.5,['#6848C0','#3828A0'],rng);}
+    else if(cp.type==='mono'){
+      const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+      bg.addColorStop(0,'rgba(180,200,220,0.30)');bg.addColorStop(1,'rgba(140,168,190,0.18)');
+      ctx.fillStyle=bg;ctx.fillRect(0,0,sz,sz);
+      [[cx-r*0.22,cy-r*0.15,r*0.13],[cx+r*0.18,cy+r*0.12,r*0.11],[cx-r*0.08,cy+r*0.20,r*0.09]].forEach(([vx,vy,vr])=>{
+        ctx.beginPath();ctx.arc(vx,vy,vr,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,0.68)';ctx.fill();
+        ctx.strokeStyle='rgba(140,170,190,0.4)';ctx.lineWidth=0.7;ctx.stroke();
+      });
+    } else if(cp.type==='mixed-granule'){
+      const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+      bg.addColorStop(0,'rgba(255,220,220,0.22)');bg.addColorStop(1,'rgba(240,200,210,0.10)');
+      ctx.fillStyle=bg;ctx.fillRect(0,0,sz,sz);
+      sG(ctx,cx,cy,r,28,4.5,['#C878A8','#A04880'],rng);
+      sG(ctx,cx,cy,r,40,2.8,['#E8A8C0','#C888A8'],rng);
+    } else if(cp.type==='reactive-lymph'){
+      const bg=ctx.createRadialGradient(cx,cy,r*0.2,cx,cy,r);
+      bg.addColorStop(0,'rgba(80,100,190,0.28)');bg.addColorStop(1,'rgba(50,60,160,0.55)');
+      ctx.fillStyle=bg;ctx.fillRect(0,0,sz,sz);
+    } else if(cp.type==='plasma'){
+      const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+      bg.addColorStop(0,'rgba(60,80,180,0.45)');bg.addColorStop(1,'rgba(40,55,150,0.60)');
+      ctx.fillStyle=bg;ctx.fillRect(0,0,sz,sz);
+      const hof=ctx.createRadialGradient(cx+r*0.15,cy,0,cx+r*0.15,cy,r*0.28);
+      hof.addColorStop(0,'rgba(255,248,220,0.70)');hof.addColorStop(1,'rgba(255,248,220,0.00)');
+      ctx.fillStyle=hof;ctx.fillRect(0,0,sz,sz);
+    } else if(cp.type==='degenerated'){
+      const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+      bg.addColorStop(0,'rgba(220,210,200,0.30)');bg.addColorStop(1,'rgba(200,188,175,0.18)');
+      ctx.fillStyle=bg;ctx.fillRect(0,0,sz,sz);
+      sG(ctx,cx,cy,r,8,r*0.12,['rgba(255,255,255,0.5)','rgba(255,255,255,0.1)'],rng);
+    }
+    ctx.restore();
+  } else if(layer==='nucleus'){
+    const np=PARTS_DEF.nucleus.find(x=>x.id===partId);if(!np||np.type==='none')return;
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+    if(np.type==='small-round'){dN(ctx,cx,cy,r*0.72,false);}
+    else if(np.type==='large-round'){dN(ctx,cx,cy,r*0.62,true);}
+    else if(np.type==='cartwheel'){
+      const nx=cx+r*0.18,ny=cy+r*0.10,nr=r*0.42;
+      dN(ctx,nx,ny,nr,false);
+      ctx.save();ctx.beginPath();ctx.arc(nx,ny,nr,0,Math.PI*2);ctx.clip();
+      ctx.strokeStyle='rgba(255,255,255,0.22)';ctx.lineWidth=1.2;
+      for(let a=0;a<6;a++){const ang=a*Math.PI/3;ctx.beginPath();ctx.moveTo(nx,ny);ctx.lineTo(nx+Math.cos(ang)*nr,ny+Math.sin(ang)*nr);ctx.stroke();}
+      ctx.restore();
+    } else if(np.type==='irregular'){
+      const g=ctx.createRadialGradient(cx-r*0.08,cy-r*0.08,r*0.05,cx,cy,r*0.58);
+      g.addColorStop(0,'#8878C0');g.addColorStop(1,'#3E2880');
+      ctx.beginPath();
+      ctx.moveTo(cx-r*0.50,cy-r*0.10);ctx.bezierCurveTo(cx-r*0.40,cy-r*0.52,cx+r*0.28,cy-r*0.50,cx+r*0.50,cy-r*0.08);
+      ctx.bezierCurveTo(cx+r*0.42,cy+r*0.38,cx+r*0.08,cy+r*0.46,cx-r*0.20,cy+r*0.40);
+      ctx.bezierCurveTo(cx-r*0.52,cy+r*0.30,cx-r*0.60,cy+r*0.10,cx-r*0.50,cy-r*0.10);
+      ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='#2C1868';ctx.lineWidth=1.1;ctx.stroke();
+    } else if(np.type==='band'){dBand(ctx,cx,cy,r);}
+    else if(np.type==='segmented'){
+      const lb=[[cx-r*0.30,cy+r*0.08,r*0.27],[cx,cy-r*0.10,r*0.29],[cx+r*0.30,cy+r*0.08,r*0.25]];
+      lb.forEach(([lx,ly,lr])=>dN(ctx,lx,ly,lr,false));
+      ctx.strokeStyle='#5A40A8';ctx.lineWidth=2.2;ctx.lineCap='round';
+      for(let i=0;i<lb.length-1;i++){ctx.beginPath();ctx.moveTo(lb[i][0],lb[i][1]);ctx.quadraticCurveTo((lb[i][0]+lb[i+1][0])/2,(lb[i][1]+lb[i+1][1])/2-5,lb[i+1][0],lb[i+1][1]);ctx.stroke();}
+    } else if(np.type==='bilobed'){
+      [[cx-r*0.28,cy,r*0.26],[cx+r*0.28,cy,r*0.26]].forEach(([lx,ly,lr])=>dN(ctx,lx,ly,lr,false));
+      ctx.strokeStyle='#5A40A8';ctx.lineWidth=2.2;ctx.lineCap='round';
+      ctx.beginPath();ctx.moveTo(cx-r*0.02,cy);ctx.lineTo(cx+r*0.02,cy);ctx.stroke();
+    } else if(np.type==='horseshoe'){dHorse(ctx,cx,cy,r);}
+    else if(np.type==='kidney'){
+      const g=ctx.createRadialGradient(cx,cy-r*0.10,r*0.05,cx,cy,r*0.52);
+      g.addColorStop(0,'#8070BC');g.addColorStop(1,'#3E2880');
+      ctx.beginPath();
+      ctx.moveTo(cx-r*0.46,cy-r*0.08);ctx.bezierCurveTo(cx-r*0.44,cy-r*0.44,cx+r*0.44,cy-r*0.44,cx+r*0.46,cy-r*0.08);
+      ctx.bezierCurveTo(cx+r*0.46,cy+r*0.32,cx+r*0.16,cy+r*0.28,cx+r*0.02,cy+r*0.08);
+      ctx.bezierCurveTo(cx-r*0.02,cy+r*0.08,cx-r*0.16,cy+r*0.28,cx-r*0.46,cy+r*0.32);
+      ctx.closePath();ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='#2C1868';ctx.lineWidth=1.1;ctx.stroke();
+    } else if(np.type==='round-mid'){dN(ctx,cx,cy+r*0.06,r*0.56,true);}
+    else if(np.type==='pyknotic'){
+      const rng2=seed(77);
+      [[cx-r*0.12,cy-r*0.08,r*0.22],[cx+r*0.14,cy+r*0.06,r*0.16],[cx-r*0.04,cy+r*0.18,r*0.12]].forEach(([px,py,pr])=>{
+        const pg=ctx.createRadialGradient(px,py,1,px,py,pr);
+        pg.addColorStop(0,'#4A3090');pg.addColorStop(1,'#1E0848');
+        ctx.beginPath();ctx.arc(px,py,pr*(0.8+rng2()*0.3),0,Math.PI*2);ctx.fillStyle=pg;ctx.globalAlpha=0.85+rng2()*0.15;ctx.fill();
+      });ctx.globalAlpha=1;
+    }
+    ctx.restore();
+  } else if(layer==='nucleolus'){
+    const np=PARTS_DEF.nucleolus.find(x=>x.id===partId);if(!np||np.type==='none')return;
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+    const dNU=(nx,ny,nr)=>{
+      const ng=ctx.createRadialGradient(nx-nr*0.3,ny-nr*0.3,0.5,nx,ny,nr);
+      ng.addColorStop(0,'#FFFFFF');ng.addColorStop(0.5,'#E8E0FF');ng.addColorStop(1,'#C0B0F0');
+      ctx.beginPath();ctx.arc(nx,ny,nr,0,Math.PI*2);ctx.fillStyle=ng;ctx.fill();
+      ctx.strokeStyle='#A898D8';ctx.lineWidth=0.8;ctx.stroke();
+    };
+    if(np.type==='small'){dNU(cx+r*0.14,cy-r*0.10,r*0.10);}
+    else if(np.type==='medium'){dNU(cx-r*0.14,cy-r*0.10,r*0.12);dNU(cx+r*0.16,cy+r*0.08,r*0.10);}
+    else if(np.type==='prominent'){dNU(cx-r*0.16,cy-r*0.12,r*0.17);dNU(cx+r*0.18,cy+r*0.06,r*0.13);dNU(cx-r*0.04,cy+r*0.20,r*0.10);}
+    ctx.restore();
+  } else if(layer==='inclusion'){
+    const ip=PARTS_DEF.inclusion.find(x=>x.id===partId);if(!ip||ip.type==='none')return;
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+    if(ip.type==='azurophilic'){const rng3=seed(42);sG(ctx,cx,cy,r,18,r*0.09,['#B04880','#802050'],rng3);}
+    else if(ip.type==='auer'){
+      ctx.save();ctx.translate(cx+r*0.18,cy+r*0.22);ctx.rotate(-0.42);
+      const rg=ctx.createLinearGradient(-4,-r*0.36,4,r*0.08);
+      rg.addColorStop(0,'#E87090');rg.addColorStop(0.5,'#C04868');rg.addColorStop(1,'#902040');
+      ctx.beginPath();ctx.roundRect(-4,-r*0.36,8,r*0.44,4);ctx.fillStyle=rg;ctx.fill();ctx.strokeStyle='#780030';ctx.lineWidth=0.8;ctx.stroke();ctx.restore();
+    } else if(ip.type==='dohle'){
+      const dg=ctx.createRadialGradient(cx-r*0.52,cy-r*0.32,1,cx-r*0.52,cy-r*0.32,r*0.17);
+      dg.addColorStop(0,'#C8D8EC');dg.addColorStop(1,'#8898B8');
+      ctx.beginPath();ctx.ellipse(cx-r*0.52,cy-r*0.32,r*0.18,r*0.12,0.4,0,Math.PI*2);
+      ctx.fillStyle=dg;ctx.globalAlpha=0.82;ctx.fill();ctx.strokeStyle='#7888A8';ctx.lineWidth=0.8;ctx.stroke();ctx.globalAlpha=1;
+    } else if(ip.type==='toxic-granule'){const rng4=seed(88);sG(ctx,cx,cy,r,14,r*0.10,['#504070','#2A1848'],rng4);}
+    ctx.restore();
+  }
+  // highlight
+  const bp2=layer==='body'?(PARTS_DEF.body.find(x=>x.id===partId)||bp):bp;
+  const rHL=(sz/2-5)*(layer==='body'?bp2.size:bp.size);
+  const hl=ctx.createRadialGradient(cx-rHL*0.22,cy-rHL*0.28,1,cx-rHL*0.08,cy-rHL*0.1,rHL*0.6);
+  hl.addColorStop(0,'rgba(255,255,255,0.55)');hl.addColorStop(0.5,'rgba(255,255,255,0.15)');hl.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.save();ctx.beginPath();ctx.arc(cx,cy,rHL,0,Math.PI*2);ctx.clip();
+  ctx.fillStyle=hl;ctx.fillRect(0,0,sz,sz);ctx.restore();
+}
+
+/* ── Draw a tiny thumbnail for select option previews ── */
+function drawThumb(layer, partId, bodyId, size=40) {
+  const cv = document.createElement('canvas');
+  cv.width = size; cv.height = size;
+  const ctx = cv.getContext('2d');
+  // draw body bg first for context layers
+  if (layer !== 'body') drawPartOnCtx(ctx, 'body', bodyId, bodyId, size);
+  drawPartOnCtx(ctx, layer, partId, bodyId, size);
+  return cv;
+}
+
+/* ══════════════════════════════════════════════════════════
+   PREVIEW
+   ══════════════════════════════════════════════════════════ */
+function updatePreview() {
+  const q = bank[activeIdx];
+  if (!q) return;
+  const cv  = document.getElementById('preview-canvas');
+  const sz  = cv.width;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0,0,sz,sz);
+  // Background circle
+  ctx.beginPath();ctx.arc(sz/2,sz/2,sz/2-2,0,Math.PI*2);
+  ctx.fillStyle='#2A1E14';ctx.fill();
+  // Draw layers
+  for (const layer of LAYER_ORDER) {
+    const pid = q.answer[layer];
+    if (pid) drawPartOnCtx(ctx, layer, pid, q.answer.body, sz);
+  }
+  document.getElementById('preview-name').textContent = q.text || '—';
+  document.getElementById('preview-sub').textContent  = q.sub  || '';
+
+  // Layer info rows
+  const pl = document.getElementById('preview-layers');
+  pl.innerHTML = '';
+  for (const layer of LAYER_ORDER) {
+    const pid = q.answer[layer];
+    const def = (PARTS_DEF[layer]||[]).find(p=>p.id===pid);
+    const row = document.createElement('div');
+    row.className='preview-layer-row';
+    row.innerHTML=`<span class="preview-layer-name">${LAYER_NAMES[layer]}</span>
+                   <span class="preview-layer-val">${def?def.name:'—'} <span style="color:var(--text-dim2);font-size:10px;">${pid||''}</span></span>`;
+    pl.appendChild(row);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   QUESTION LIST
+   ══════════════════════════════════════════════════════════ */
+function renderList() {
+  const list = document.getElementById('q-list');
+  list.innerHTML = '';
+  bank.forEach((q, i) => {
+    const item = document.createElement('div');
+    item.className = 'q-item' + (i===activeIdx?' active':'');
+    const stars = '⭐'.repeat(q.diff||1);
+    item.innerHTML = `
+      <div class="q-item-name">${q.text||'（未命名）'}</div>
+      <div class="q-item-sub">${q.sub||''}</div>
+      <div class="q-item-diff">${stars} ${'初級/中級/困難'.split('/')[( q.diff||1)-1]}</div>
+      <button class="q-item-del" title="刪除此題" onclick="deleteQuestion(${i},event)">×</button>
+    `;
+    item.addEventListener('click', ()=>selectQuestion(i));
+    list.appendChild(item);
+  });
+}
+
+function selectQuestion(i) {
+  activeIdx = i;
+  renderList();
+  loadForm();
+  updatePreview();
+}
+
+function addQuestion() {
+  bank.push(newQ());
+  selectQuestion(bank.length - 1);
+  showToast('已新增一道題目');
+}
+
+function deleteQuestion(i, e) {
+  e.stopPropagation();
+  if (bank.length <= 1) { showToast('至少保留一道題目'); return; }
+  if (!confirm(`確定刪除「${bank[i].text}」？`)) return;
+  bank.splice(i, 1);
+  if (activeIdx >= bank.length) activeIdx = bank.length - 1;
+  renderList();
+  loadForm();
+  updatePreview();
+  showToast('已刪除');
+}
+
+/* ══════════════════════════════════════════════════════════
+   FORM
+   ══════════════════════════════════════════════════════════ */
+function loadForm() {
+  const q = bank[activeIdx];
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('edit-form').style.display   = 'flex';
+
+  document.getElementById('f-text').value = q.text || '';
+  document.getElementById('f-sub').value  = q.sub  || '';
+  document.getElementById('f-hint').value = q.hint || '';
+
+  // 向下相容：舊格式 photo/photoCredit → 轉成 photos[]
+  if (!Array.isArray(q.photos)) {
+    q.photos = q.photo ? [{ src: q.photo, credit: q.photoCredit || '' }] : [];
+    delete q.photo; delete q.photoCredit;
+  }
+
+  // Difficulty
+  document.querySelectorAll('.diff-opt').forEach(el=>{
+    el.classList.toggle('active', +el.dataset.diff === (q.diff||1));
+  });
+
+  // Layer selects
+  buildLayerSelects(q);
+
+  // Photos list
+  renderPhotosList();
+}
+
+/* ── Photos list UI ── */
+function renderPhotosList() {
+  const q = bank[activeIdx];
+  if (!Array.isArray(q.photos)) q.photos = [];
+  const container = document.getElementById('photos-list');
+  container.innerHTML = '';
+
+  if (q.photos.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'font-size:12px;color:var(--text-dim2);padding:4px 0;';
+    empty.textContent = '尚未加入照片，按右上「＋ 新增照片」';
+    container.appendChild(empty);
+    return;
+  }
+
+  q.photos.forEach((item, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = `
+      display:grid; grid-template-columns:1fr 1fr auto; gap:8px; align-items:start;
+      padding:10px 12px; border-radius:8px;
+      background:var(--bg3); border:1px solid var(--border);
+    `;
+
+    const srcWrap = document.createElement('div');
+    srcWrap.className = 'field';
+    srcWrap.innerHTML = `<label style="font-size:11px;">路徑 #${i+1}</label>`;
+    const srcInput = document.createElement('input');
+    srcInput.type = 'text'; srcInput.value = item.src || '';
+    srcInput.placeholder = `photos/cell-name-${i+1}.jpg`;
+    srcInput.addEventListener('input', () => { bank[activeIdx].photos[i].src = srcInput.value; });
+    srcWrap.appendChild(srcInput);
+
+    const creditWrap = document.createElement('div');
+    creditWrap.className = 'field';
+    creditWrap.innerHTML = `<label style="font-size:11px;">來源標註（選填）</label>`;
+    const creditInput = document.createElement('input');
+    creditInput.type = 'text'; creditInput.value = item.credit || '';
+    creditInput.placeholder = '© 出處 / 版權標註';
+    creditInput.addEventListener('input', () => { bank[activeIdx].photos[i].credit = creditInput.value; });
+    creditWrap.appendChild(creditInput);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-ghost btn-sm';
+    delBtn.style.cssText = 'color:rgba(200,80,80,0.7);border-color:rgba(200,80,80,0.25);margin-top:22px;flex-shrink:0;';
+    delBtn.textContent = '刪除';
+    delBtn.onclick = () => { bank[activeIdx].photos.splice(i, 1); renderPhotosList(); };
+
+    row.appendChild(srcWrap); row.appendChild(creditWrap); row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+function addPhotoRow() {
+  if (!bank[activeIdx]) return;
+  if (!Array.isArray(bank[activeIdx].photos)) bank[activeIdx].photos = [];
+  bank[activeIdx].photos.push({ src: '', credit: '' });
+  renderPhotosList();
+}
+
+function syncField(key, val) {
+  if (!bank[activeIdx]) return;
+  if (key === 'text' || key === 'sub' || key === 'hint') {
+    bank[activeIdx][key] = val;
+  }
+  renderList();
+  if (key === 'text' || key === 'sub') updatePreview();
+}
+
+function buildLayerSelects(q) {
+  const container = document.getElementById('layer-selects');
+  container.innerHTML = '';
+
+  LAYER_ORDER.forEach(layer => {
+    const parts  = PARTS_DEF[layer] || [];
+    const curId  = q.answer[layer] || parts[0]?.id;
+
+    const field = document.createElement('div');
+    field.className = 'field';
+    field.innerHTML = `<label>${LAYER_NAMES[layer]} <span class="layer-badge">answer.${layer}</span></label>`;
+
+    // Thumbnail + select in a row
+    const row = document.createElement('div');
+    row.className = 'layer-row';
+
+    // Thumbnail canvas
+    const thumbWrap = document.createElement('div');
+    thumbWrap.className = 'layer-preview-cell';
+    const thumb = drawThumb(layer, curId, q.answer.body, 40);
+    thumbWrap.appendChild(thumb);
+
+    // Select
+    const sel = document.createElement('select');
+    sel.id = `sel-${layer}`;
+    parts.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.name}  (${p.id})`;
+      if (p.id === curId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', () => {
+      bank[activeIdx].answer[layer] = sel.value;
+      // Update thumb
+      thumbWrap.innerHTML = '';
+      thumbWrap.appendChild(drawThumb(layer, sel.value, bank[activeIdx].answer.body, 40));
+      updatePreview();
+    });
+
+    row.appendChild(thumbWrap);
+    row.appendChild(sel);
+    field.appendChild(row);
+    container.appendChild(field);
+  });
+}
+
+function syncField(key, val) {
+  if (!bank[activeIdx]) return;
+  if (key === 'text' || key === 'sub' || key === 'hint') {
+    bank[activeIdx][key] = val;
+  }
+  renderList();
+  if (key === 'text' || key === 'sub') updatePreview();
+}
+
+function setQDiff(d) {
+  if (!bank[activeIdx]) return;
+  bank[activeIdx].diff = d;
+  document.querySelectorAll('.diff-opt').forEach(el=>{
+    el.classList.toggle('active', +el.dataset.diff === d);
+  });
+  renderList();
+}
+
+/* ══════════════════════════════════════════════════════════
+   EXPORT
+   ══════════════════════════════════════════════════════════ */
+function exportQuestions() {
+  const header = `/**
+ * questions.js — 血球拼圖題庫
+ * 由 editor.html 自動產生於 ${new Date().toLocaleString('zh-TW')}
+ * 請勿手動修改，使用 editor.html 編輯後重新匯出。
+ *
+ * 更新步驟：
+ *   1. 將此檔案覆蓋遊戲資料夾中的舊 questions.js
+ *   2. 重新整理 game.html 即完成更新
+ */
+
+const QUESTIONS = `;
+
+  const body = JSON.stringify(bank, null, 2);
+  const footer = `;\n`;
+
+  const content = header + body + footer;
+  const blob = new Blob([content], { type: 'text/javascript' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'questions.js';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`✅ 已匯出 questions.js（共 ${bank.length} 道題）`);
+}
+
+/* ══════════════════════════════════════════════════════════
+   IMPORT
+   ══════════════════════════════════════════════════════════ */
+let _importFileContent = null;  // 暫存讀取到的檔案內容
+
+function showImportModal() {
+  _importFileContent = null;
+  document.getElementById('import-file-name').textContent = '';
+  document.getElementById('import-confirm-btn').disabled = true;
+  document.getElementById('import-modal').classList.add('show');
+}
+
+function closeImportModal() {
+  document.getElementById('import-modal').classList.remove('show');
+  _importFileContent = null;
+}
+
+/** 解析 questions.js 內容並匯入題庫 */
+function parseAndImport(raw) {
+  try {
+    let parsed = null;
+
+    // 方法一：用 Function 執行 JS（支援完整 questions.js 格式，包含註解）
+    try {
+      const fn = new Function(`
+        ${raw}
+        return typeof QUESTIONS !== 'undefined' ? QUESTIONS : null;
+      `);
+      parsed = fn();
+    } catch(e1) {
+      // 方法二：用正規表達式擷取陣列後 JSON.parse（fallback）
+      const match = raw.match(/(?:const|var|let)\s+QUESTIONS\s*=\s*(\[[\s\S]*?\])\s*;?\s*(?:\/\/[^\n]*)?$/m);
+      if (match) parsed = JSON.parse(match[1]);
+    }
+
+    if (!Array.isArray(parsed) || parsed.length === 0)
+      throw new Error('找不到有效的題庫陣列');
+
+    bank = parsed;
+    activeIdx = 0;
+    renderList();
+    loadForm();
+    updatePreview();
+    closeImportModal();
+    showToast(`✅ 匯入成功，共 ${bank.length} 道題`);
+  } catch(e) {
+    alert('匯入失敗，請確認選擇的是正確的 questions.js 檔案。\n\n錯誤：' + e.message);
+  }
+}
+
+function doImport() {
+  if (_importFileContent) parseAndImport(_importFileContent);
+}
+
+/** 讀取 File 物件 */
+function readImportFile(file) {
+  if (!file) return;
+  if (!file.name.endsWith('.js')) {
+    alert('請選擇 .js 格式的檔案');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    _importFileContent = e.target.result;
+    document.getElementById('import-file-name').textContent = `📄 ${file.name}`;
+    document.getElementById('import-confirm-btn').disabled = false;
+  };
+  reader.onerror = () => alert('讀取檔案失敗，請重試。');
+  reader.readAsText(file, 'UTF-8');
+}
+
+/* 初始化：拖放 + 點擊選檔 */
+window.addEventListener('DOMContentLoaded', () => {
+  const zone  = document.getElementById('import-drop-zone');
+  const input = document.getElementById('import-file-input');
+
+  // 點擊開啟檔案選擇器
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    if (input.files[0]) readImportFile(input.files[0]);
+    input.value = '';  // 重置，允許重複選同一個檔
+  });
+
+  // 拖放
+  zone.addEventListener('dragover', e => {
+    e.preventDefault();
+    zone.classList.add('drag-over');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) readImportFile(file);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════
+   HELP
+   ══════════════════════════════════════════════════════════ */
+function showHelp() {
+  document.getElementById('help-modal').classList.add('show');
+}
+
+/* ══════════════════════════════════════════════════════════
+   TOAST
+   ══════════════════════════════════════════════════════════ */
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+/* ══════════════════════════════════════════════════════════
+   KEYBOARD SHORTCUTS
+   ══════════════════════════════════════════════════════════ */
+document.addEventListener('keydown', e=>{
+  // Cmd/Ctrl+S → export
+  if ((e.metaKey||e.ctrlKey) && e.key==='s') {
+    e.preventDefault(); exportQuestions();
+  }
+  // Escape → close modals
+  if (e.key==='Escape') {
+    document.querySelectorAll('.modal-backdrop').forEach(m=>m.classList.remove('show'));
+  }
+  // Arrow up/down → navigate questions
+  if ((e.key==='ArrowUp'||e.key==='ArrowDown') && !e.target.matches('input,textarea,select')) {
+    e.preventDefault();
+    const delta = e.key==='ArrowDown' ? 1 : -1;
+    const next  = Math.max(0, Math.min(bank.length-1, activeIdx+delta));
+    if (next !== activeIdx) selectQuestion(next);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════════════ */
+window.addEventListener('load', ()=>{
+  renderList();
+  if (bank.length > 0) {
+    selectQuestion(0);
+  }
+});
+</script>
+</body>
+</html>

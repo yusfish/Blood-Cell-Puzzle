@@ -1,0 +1,2101 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>血球拼圖遊戲</title>
+
+<!--
+  ════════════════════════════════════════════════════════
+  blood-cell-game / game.html  v4
+  ════════════════════════════════════════════════════════
+  依賴檔案（放在同一資料夾）：
+    parts.js        — 零件圖庫定義
+    questions.js    — 題庫
+    parts/          — 零件 PNG 圖片（透明背景，512×512）
+    photos/         — 真實顯微鏡照片
+
+  若零件圖片尚未備齊，遊戲自動退回 Canvas 程式繪製。
+  ════════════════════════════════════════════════════════
+-->
+
+<script src="parts.js"></script>
+<script src="questions.js"></script>
+
+<style>
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;       /* 防止捲軸出現 */
+  background: #3A2510;   /* 視窗比遊戲大時的底色 */
+}
+
+/* ── App Shell ── */
+#app {
+  width: 100dvw; height: 100dvh;
+  position: relative; overflow: hidden;
+  font-family: 'Helvetica Neue', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  font-size: 18px;
+}
+/*
+  ── 遊戲桌面背景設定 ────────────────────────────────────
+  將圖片檔放在同一資料夾，修改下方 url() 即可換圖。
+  支援 JPG / PNG / WebP，建議解析度 1920×1080。
+  若不使用圖片，可改為純色：background: #7A5530;
+  ─────────────────────────────────────────────────────── */
+#table {
+  width: 100%; height: 100%; position: relative;
+  background:
+    url('table-bg.jpg') center/cover no-repeat,
+    #7A5530;          /* 圖片載入前或不存在時的備用色 */
+  cursor: default;
+}
+/* wood-canvas 改為疊加紋理層：圖片存在時也保留細微木紋線條感 */
+#wood-canvas {
+  position: absolute; inset: 0; pointer-events: none;
+  opacity: 0.35;      /* 有自訂圖片時降低木紋透明度；純色時可改回 1 */
+}
+
+/* ── 小螢幕提示遮罩（< 900px 寬 或 < 560px 高） ── */
+#small-screen-mask {
+  display: none;
+  position: fixed; inset: 0; z-index: 99999;
+  background: #1A0E06;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 20px; padding: 32px; text-align: center;
+  font-family: 'Helvetica Neue', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+}
+#small-screen-mask .mask-icon { font-size: 56px; }
+#small-screen-mask h2 { font-size: 22px; font-weight: 600; color: #FFE4A0; }
+#small-screen-mask p  { font-size: 16px; color: rgba(255,220,160,0.65); line-height: 1.7; max-width: 320px; }
+
+@media (max-width: 899px), (max-height: 559px) {
+  #small-screen-mask { display: flex; }
+}
+
+/* ── HUD ── */
+.hud-label  { font-size: 18px; color: rgba(255,220,140,0.6); letter-spacing: 0.5px; }
+.hud-text   { font-size: 18px; font-weight: 500; color: #FFE8A0; }
+.hud-sub    { font-size: 18px; color: rgba(255,210,130,0.6); }
+
+/* 分數區塊：答對 / 答錯 / 連勝 */
+.score-group {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 14px; background: rgba(255,190,60,0.12);
+  border-radius: 14px; border: 1px solid rgba(255,200,80,0.22);
+}
+.score-item {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 16px; white-space: nowrap;
+}
+.score-item .si-label { color: rgba(255,220,140,0.60); font-size: 14px; }
+.score-item .si-val   { font-weight: 600; font-size: 17px; }
+.score-item .si-unit  { color: rgba(255,220,140,0.55); font-size: 14px; }
+.score-divider { color: rgba(255,200,80,0.22); font-size: 16px; }
+.si-correct  { color: #80E880; }
+.si-wrong    { color: #FF8888; }
+.si-streak   { color: #FFD060; }
+.si-streak-0 { color: rgba(255,200,120,0.40); }  /* 連勝=0 時暗色 */
+
+/* ── Mode A HUD ── */
+#hud {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(40,24,8,0.86); border-radius: 22px; padding: 8px 22px;
+  display: flex; align-items: center; gap: 16px; z-index: 50;
+  backdrop-filter: blur(4px); border: 1px solid rgba(255,200,80,0.18);
+}
+
+/* ── Assembly Zone ── */
+#assembly-zone {
+  position: absolute; border-radius: 50%;
+  border: 3px dashed rgba(255,240,200,0.45);
+  background: rgba(255,245,220,0.10);
+  transform: translate(-50%,-50%); pointer-events: none; transition: box-shadow 0.3s;
+}
+#assembly-zone.glow { box-shadow: 0 0 40px 12px rgba(255,220,100,0.30); }
+
+/* ── Parts ── */
+.part { position: absolute; cursor: grab; touch-action: none; }
+.part:active { cursor: grabbing; }
+.part.dragging {
+  z-index: 1000;
+  filter: drop-shadow(0 10px 22px rgba(0,0,0,0.5)) !important;
+  transition: none;
+}
+.part.snapping {
+  transition:
+    left   0.25s cubic-bezier(.15,1.7,.35,1),
+    top    0.25s cubic-bezier(.15,1.7,.35,1),
+    transform 0.25s cubic-bezier(.15,1.7,.35,1);
+}
+.part-label {
+  position: absolute; bottom: -28px; left: 50%; transform: translateX(-50%);
+  white-space: nowrap; font-size: 20px; font-weight: 700;
+  color: rgba(255,235,170,0.95); text-shadow: 0 1px 5px rgba(0,0,0,0.85);
+  pointer-events: none; letter-spacing: 0.2px;
+}
+
+/* ── Part Image (v4: PNG sandwiched between canvas layers) ── */
+.part-img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: contain; pointer-events: none;
+  border-radius: 50%;
+  /* Clip PNG to circle so bubble glass sits cleanly on top */
+  clip-path: circle(49% at 50% 50%);
+}
+
+/* ── Bottom Bar (Mode A) ── */
+#bottom-bar {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+#layer-hint {
+  font-size: 18px; color: rgba(255,220,140,0.75);
+  text-align: center; text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+}
+#submit-btn {
+  padding: 12px 38px; background: rgba(60,40,12,0.90); color: #FFE0A0;
+  border: 1.5px solid rgba(255,205,90,0.45); border-radius: 22px;
+  font-size: 18px; font-weight: 500; cursor: pointer;
+  backdrop-filter: blur(4px); transition: all 0.15s; letter-spacing: 0.4px;
+}
+#submit-btn:hover:not(:disabled) { background: rgba(90,60,18,0.96); border-color: rgba(255,210,100,0.75); }
+#submit-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+
+/* ══════════════════════════════════════════
+   FEEDBACK PANEL (v4 重新設計)
+   上半：結果 + 提示文字
+   下半：真實顯微鏡照片
+   ══════════════════════════════════════════ */
+#feedback {
+  position: absolute; inset: 0; border-radius: 12px;
+  display: none; align-items: stretch;
+  flex-direction: row; z-index: 9999; overflow: hidden;
+}
+#feedback.show { display: flex; }
+
+/* 左欄：文字結果 */
+#fb-left {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 16px; padding: 32px 28px;
+}
+#feedback.correct #fb-left { background: rgba(12,45,22,0.95); }
+#feedback.wrong   #fb-left { background: rgba(50,12,12,0.95); }
+
+#fb-emoji { font-size: 52px; }
+#fb-title { font-size: 22px; font-weight: 600; color: #D8FFE0; }
+#feedback.wrong #fb-title { color: #FFD8D8; }
+
+#fb-cell-name { font-size: 20px; font-weight: 500; color: #FFE8A0; }
+#fb-cell-sub  { font-size: 16px; color: rgba(255,220,140,0.65); font-style: italic; margin-top: -8px; }
+
+#fb-desc {
+  font-size: 16px; color: rgba(255,255,255,0.82);
+  text-align: left; max-width: 420px; line-height: 1.85;
+  width: 100%;
+}
+#fb-btn {
+  padding: 11px 32px; border: none; border-radius: 22px;
+  font-size: 18px; font-weight: 500; cursor: pointer; margin-top: 4px;
+}
+#feedback.correct #fb-btn { background: #3A7028; color: #fff; }
+#feedback.wrong   #fb-btn { background: #7A2828; color: #fff; }
+
+/* 右欄：照片輪播 */
+#fb-right {
+  width: 60%; flex-shrink: 0;
+  display: flex; flex-direction: column;
+  align-items: stretch; justify-content: stretch;
+  position: relative; overflow: hidden;
+  background: #0A0E0C;   /* 深色底，讓 contain 模式的空白區乾淨 */
+}
+#feedback.wrong #fb-right { display: none; }
+
+/* 照片容器：flex 佔滿上方空間 */
+#fb-photo-wrap {
+  flex: 1; position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* 照片本體：contain 完整顯示，不裁切 */
+#fb-photo {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;   /* 完整顯示，維持比例 */
+  display: block; opacity: 0;
+  transition: opacity 0.30s ease;
+}
+#fb-photo.visible { opacity: 1; }
+
+/* 無照片佔位 */
+#fb-photo-placeholder {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; background: rgba(20,40,30,0.88);
+  color: rgba(200,230,200,0.55); font-size: 16px; text-align: center;
+  padding: 24px;
+}
+#fb-photo-placeholder .ph-icon { font-size: 42px; opacity: 0.4; }
+
+/* 左右箭頭（疊在照片上） */
+.fb-arrow {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 38px; height: 38px; border-radius: 50%;
+  background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.20);
+  color: rgba(255,255,255,0.85); font-size: 18px; line-height: 1;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(4px); transition: background 0.15s, opacity 0.15s;
+  z-index: 10; user-select: none;
+}
+.fb-arrow:hover { background: rgba(0,0,0,0.70); }
+.fb-arrow:disabled { opacity: 0.20; cursor: default; }
+#fb-arrow-prev { left: 10px; }
+#fb-arrow-next { right: 10px; }
+
+/* 底部：計數器 + 來源標註 */
+#fb-bottom-bar {
+  flex-shrink: 0;
+  background: rgba(0,0,0,0.55); backdrop-filter: blur(3px);
+  padding: 7px 14px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+#fb-counter {
+  font-size: 16px; color: rgba(255,255,255,0.60);
+  white-space: nowrap; flex-shrink: 0;
+}
+#fb-credit {
+  font-size: 14px; color: rgba(255,255,255,0.45);
+  text-align: right; flex: 1; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Mode B ── */
+#mb-hud {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(40,24,8,0.86); border-radius: 22px; padding: 8px 22px;
+  display: none; align-items: center; gap: 16px; z-index: 50;
+  backdrop-filter: blur(4px); border: 1px solid rgba(255,200,80,0.18);
+}
+#mb-hud.show { display: flex; }
+#mb-cell-wrap {
+  position: absolute; border-radius: 50%;
+  transform: translate(-50%,-50%); pointer-events: none; z-index: 5;
+  transition: box-shadow 0.3s;
+}
+#mb-cell-wrap.glow { box-shadow: 0 0 40px 14px rgba(255,220,100,0.30); }
+#mb-bottom {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 200; display: none; flex-direction: column;
+  align-items: center; gap: 8px; width: 94%; max-width: 620px;
+}
+#mb-bottom.show { display: flex; }
+#mb-hint {
+  font-size: 18px; color: rgba(255,225,150,0.85);
+  text-align: center; text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+}
+
+/* ── 答題後說明覆蓋層（最上層，蓋住血球和零件） ── */
+#mb-result-overlay {
+  position: absolute; inset: 0;
+  z-index: 500;
+  display: none;
+  flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 24px 32px; gap: 16px;
+  background: rgba(20,10,4,0.72);
+  backdrop-filter: blur(3px);
+}
+#mb-result-overlay.show { display: flex; }
+
+#mb-feedback {
+  font-size: 16px; color: rgba(20,10,0,0.90);
+  text-align: left; line-height: 1.80;
+  padding: 16px 22px;
+  background: rgba(255,252,240,0.92);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  width: 100%; max-width: 680px;
+  max-height: 65vh; overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+}
+#mb-feedback::-webkit-scrollbar { width: 4px; }
+#mb-feedback::-webkit-scrollbar-thumb { background: rgba(150,100,40,0.35); border-radius: 2px; }
+
+#mb-next-btn {
+  padding: 10px 34px; background: rgba(60,40,12,0.90); color: #FFE0A0;
+  border: 1.5px solid rgba(255,205,90,0.45); border-radius: 22px;
+  font-size: 18px; font-weight: 500; cursor: pointer;
+  backdrop-filter: blur(4px); transition: all 0.15s;
+}
+#mb-next-btn:hover { background: rgba(90,60,18,0.96); border-color: rgba(255,210,100,0.75); }
+
+/* ── Animations ── */
+@keyframes correctFlash {
+  0%   { filter: drop-shadow(0 0 0px   rgba(80,220,100,0)); }
+  50%  { filter: drop-shadow(0 0 28px  rgba(80,220,100,0.95)); }
+  100% { filter: drop-shadow(0 0 8px   rgba(80,220,100,0.35)); }
+}
+.flash-correct { animation: correctFlash 0.55s ease; }
+
+@keyframes wrongShake {
+  0%,100% { transform: translate(-50%,-50%); }
+  20%,60%  { transform: translate(calc(-50% - 8px),-50%); }
+  40%,80%  { transform: translate(calc(-50% + 8px),-50%); }
+}
+.flash-wrong { animation: wrongShake 0.38s ease; }
+
+/* ── Photo fade-in ── */
+@keyframes photoReveal {
+  from { opacity: 0; transform: scale(1.03); }
+  to   { opacity: 1; transform: scale(1); }
+}
+#fb-photo { animation: photoReveal 0.45s ease forwards; }
+
+/* ════════════════════════════════════════════════════════
+   MENU SCREEN
+   ════════════════════════════════════════════════════════ */
+
+/*
+  ── 背景圖片設定 ──────────────────────────────────────
+  將圖片檔放在同一資料夾，修改下方 url() 即可換圖。
+  支援 JPG / PNG / WebP。
+  若不使用圖片，可改為純色：background: #1A0E06;
+  ─────────────────────────────────────────────────────── */
+#menu {
+  position: absolute; inset: 0; z-index: 500;
+  background:
+    linear-gradient(rgba(10,4,2,0.52), rgba(10,4,2,0.68)),
+    url('menu-bg.jpg') center/cover no-repeat;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 0;
+  /* 滑出動畫 */
+  transition: transform 0.55s cubic-bezier(.76,0,.24,1),
+              opacity   0.45s ease;
+}
+#menu.slide-out-left {
+  transform: translateX(-100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── 遊戲標題 ── */
+#menu-title {
+  font-size: 42px; font-weight: 700; letter-spacing: 2px;
+  color: #FFE8A0;
+  text-shadow: 0 2px 24px rgba(0,0,0,0.8), 0 0 60px rgba(255,200,80,0.25);
+  margin-bottom: 8px;
+}
+#menu-subtitle {
+  font-size: 18px; color: rgba(255,220,140,0.60);
+  letter-spacing: 1px; margin-bottom: 52px;
+}
+
+/* ── 模式卡片 ── */
+#menu-modes {
+  display: flex; gap: 24px; margin-bottom: 40px;
+}
+.menu-mode-card {
+  width: 240px; padding: 28px 24px 24px;
+  border-radius: 18px; cursor: pointer;
+  border: 2px solid rgba(255,200,80,0.18);
+  background: rgba(30,16,4,0.78);
+  backdrop-filter: blur(10px);
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  transition: all 0.20s; position: relative;
+}
+.menu-mode-card:hover {
+  border-color: rgba(255,200,80,0.50);
+  background: rgba(50,28,8,0.90);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45), 0 0 30px rgba(255,180,60,0.12);
+}
+.menu-mode-card.selected {
+  border-color: rgba(255,200,80,0.80);
+  background: rgba(80,48,12,0.88);
+  box-shadow: 0 0 0 3px rgba(255,200,80,0.25), 0 12px 40px rgba(0,0,0,0.5);
+}
+.menu-mode-card.selected::after {
+  content: '✓';
+  position: absolute; top: 12px; right: 14px;
+  font-size: 18px; color: #FFD060; font-weight: 700;
+}
+.menu-mode-icon  { font-size: 44px; }
+.menu-mode-name  { font-size: 22px; font-weight: 600; color: #FFE4A0; }
+.menu-mode-desc  {
+  font-size: 14px; color: rgba(255,215,150,0.65);
+  text-align: center; line-height: 1.65;
+}
+
+/* ── 難度選擇 ── */
+#menu-diff {
+  display: flex; gap: 12px; margin-bottom: 44px;
+}
+.menu-diff-btn {
+  padding: 10px 24px; border-radius: 22px; font-size: 18px;
+  cursor: pointer; border: 1.5px solid rgba(255,200,80,0.22);
+  background: rgba(30,16,4,0.75); color: rgba(255,215,130,0.60);
+  backdrop-filter: blur(6px); transition: all 0.17s;
+}
+.menu-diff-btn:hover {
+  background: rgba(60,36,10,0.88); color: #FFE4A0;
+  border-color: rgba(255,200,80,0.45);
+}
+.menu-diff-btn.selected {
+  background: rgba(200,144,42,0.28); color: #FFE4A0;
+  border-color: rgba(255,205,80,0.70);
+  box-shadow: 0 0 16px rgba(255,190,60,0.18);
+}
+
+/* ── 開始按鈕 ── */
+#menu-start-btn {
+  padding: 16px 56px; border-radius: 32px;
+  font-size: 22px; font-weight: 600; letter-spacing: 1px;
+  cursor: pointer; border: 2px solid rgba(255,210,80,0.55);
+  background: rgba(160,100,20,0.80);
+  color: #FFE8A0;
+  backdrop-filter: blur(8px);
+  transition: all 0.18s;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.45);
+}
+#menu-start-btn:hover {
+  background: rgba(200,130,30,0.92);
+  border-color: rgba(255,215,90,0.85);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 24px rgba(255,190,60,0.20);
+}
+#menu-start-btn:disabled {
+  opacity: 0.35; cursor: not-allowed; transform: none;
+}
+
+/* ════════════════════════════════════════════════════════
+   GAME SCREEN  (滑入)
+   ════════════════════════════════════════════════════════ */
+#game-screen {
+  position: absolute; inset: 0;
+  transform: translateX(100%);   /* 初始在右側畫面外 */
+  transition: transform 0.55s cubic-bezier(.76,0,.24,1);
+}
+#game-screen.slide-in {
+  transform: translateX(0);
+}
+
+/* ── 返回選單按鈕（遊戲左上角） ── */
+#back-btn {
+  position: absolute; top: 12px; left: 16px;
+  z-index: 200;
+  padding: 7px 18px; border-radius: 14px; font-size: 16px;
+  cursor: pointer; border: 1px solid rgba(255,200,80,0.28);
+  background: rgba(40,24,8,0.80); color: rgba(255,215,130,0.75);
+  backdrop-filter: blur(4px); transition: all 0.15s;
+}
+#back-btn:hover {
+  background: rgba(70,42,12,0.95); color: #FFE4A0;
+  border-color: rgba(255,210,90,0.55);
+}
+
+/* ── 紅血球尺寸參考徽章（右下角） ── */
+#rbc-ref {
+  position: absolute; bottom: 80px; right: 20px;
+  z-index: 200;
+  display: flex; flex-direction: column; align-items: center; gap: 0;
+  pointer-events: none;
+}
+
+/* 外圈金色細線圓形容器 */
+#rbc-badge {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center;
+  /* 寬高由 JS 設定，含上下文字的總高 */
+}
+
+/* 上方標題文字 */
+#rbc-ref-label {
+  font-size: 15px; font-weight: 600; letter-spacing: 1px;
+  color: rgba(255,235,170,0.88);
+  text-shadow: 0 1px 6px rgba(0,0,0,0.90);
+  text-align: center; white-space: nowrap;
+  margin-bottom: 6px;
+}
+
+/* 圖片區：金色邊框圓形 */
+#rbc-ref-ring {
+  border-radius: 50%;
+  border: 2px solid rgba(255,205,80,0.55);
+  box-shadow:
+    0 0 0 1px rgba(255,180,40,0.20),
+    0 0 18px 4px rgba(255,180,40,0.12),
+    inset 0 0 12px rgba(0,0,0,0.35);
+  background: rgba(20,12,4,0.55);
+  backdrop-filter: blur(4px);
+  overflow: hidden;
+  position: relative;
+  /* 寬高由 JS 設定 */
+}
+
+/* 下方 µm 數值 */
+#rbc-ref-sublabel {
+  font-size: 13px; font-weight: 500;
+  color: rgba(255,205,100,0.60);
+  letter-spacing: 0.5px;
+  text-align: center; white-space: nowrap;
+  margin-top: 7px;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.80);
+}
+
+/* 右下角小標記線（顯微鏡風格裝飾） */
+#rbc-ref::before {
+  content: '';
+  position: absolute; right: -14px; top: 50%;
+  width: 10px; height: 1px;
+  background: rgba(255,200,80,0.30);
+}
+
+/* ── 編輯器入口按鈕（選單右下角） ── */
+#menu-editor-btn {
+  position: absolute; bottom: 24px; right: 28px;
+  padding: 9px 20px; border-radius: 14px; font-size: 15px;
+  cursor: pointer; border: 1px solid rgba(255,200,80,0.20);
+  background: rgba(20,12,4,0.65); color: rgba(255,210,130,0.55);
+  backdrop-filter: blur(6px); transition: all 0.15s;
+  text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+}
+#menu-editor-btn:hover {
+  background: rgba(40,24,8,0.85); color: rgba(255,220,140,0.90);
+  border-color: rgba(255,200,80,0.42);
+}
+
+/* ── 音樂選單 ── */
+#menu-music {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  margin-bottom: 32px;
+}
+#menu-music-label {
+  font-size: 15px; color: rgba(255,210,130,0.60); letter-spacing: 0.5px;
+}
+#menu-music-tracks {
+  display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+}
+.music-track-btn {
+  padding: 8px 20px; border-radius: 20px; font-size: 16px;
+  cursor: pointer; border: 1.5px solid rgba(255,200,80,0.20);
+  background: rgba(20,12,4,0.65); color: rgba(255,210,130,0.55);
+  backdrop-filter: blur(6px); transition: all 0.17s;
+  display: flex; align-items: center; gap: 6px;
+}
+.music-track-btn:hover {
+  background: rgba(50,30,8,0.85); color: rgba(255,220,140,0.85);
+  border-color: rgba(255,200,80,0.40);
+}
+.music-track-btn.selected {
+  background: rgba(80,48,12,0.88); color: #FFE4A0;
+  border-color: rgba(255,205,80,0.65);
+  box-shadow: 0 0 14px rgba(255,190,60,0.15);
+}
+.music-track-btn .track-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: rgba(255,210,130,0.35); flex-shrink: 0; transition: background 0.15s;
+}
+.music-track-btn.selected .track-dot { background: #FFD060; }
+</style>
+</head>
+<body>
+
+<!-- 小螢幕提示遮罩 -->
+<div id="small-screen-mask">
+  <div class="mask-icon">🖥️</div>
+  <h2>請使用較大的螢幕</h2>
+  <p>此遊戲需要至少 900px 寬、560px 高的螢幕才能正常操作。<br>建議使用桌機、筆電或橫向平板。</p>
+</div>
+
+<div id="app">
+
+<!-- ══════════════════════════════════════
+     MENU SCREEN
+     ══════════════════════════════════════ -->
+<div id="menu">
+  <div id="menu-title">血球拼圖遊戲</div>
+  <div id="menu-subtitle">Blood Cell Puzzle</div>
+
+  <!-- 模式卡片 -->
+  <div id="menu-modes">
+    <div class="menu-mode-card selected" id="menu-card-a" onclick="menuSelectMode('A')">
+      <div class="menu-mode-icon">🧩</div>
+      <div class="menu-mode-name">模式 A　拼圖</div>
+      <div class="menu-mode-desc">把散落的細胞零件拖曳到中央，依照題目拼出正確的血球構造。</div>
+    </div>
+    <div class="menu-mode-card" id="menu-card-b" onclick="menuSelectMode('B')">
+      <div class="menu-mode-icon">🔍</div>
+      <div class="menu-mode-name">模式 B　找錯</div>
+      <div class="menu-mode-desc">畫面中的血球有一個零件被替換成錯誤的，找出並拖曳正確的零件取代它。</div>
+    </div>
+  </div>
+
+  <!-- 難度選擇 -->
+  <div id="menu-diff">
+    <button class="menu-diff-btn selected" data-diff="1" onclick="menuSelectDiff(1,this)">⭐ 初級</button>
+    <button class="menu-diff-btn"          data-diff="2" onclick="menuSelectDiff(2,this)">⭐⭐ 中級</button>
+    <button class="menu-diff-btn"          data-diff="3" onclick="menuSelectDiff(3,this)">⭐⭐⭐ 困難</button>
+  </div>
+
+  <!-- 音樂選單 -->
+  <div id="menu-music">
+    <div id="menu-music-label">🎵 遊戲背景音樂</div>
+    <div id="menu-music-tracks">
+      <button class="music-track-btn selected" data-track="random" onclick="menuSelectTrack('random',this)">
+        <span class="track-dot"></span>隨機播放
+      </button>
+      <button class="music-track-btn" data-track="music/track-1.mp3" onclick="menuSelectTrack('music/track-1.mp3',this)">
+        <span class="track-dot"></span>輕快集中
+      </button>
+      <button class="music-track-btn" data-track="music/track-2.mp3" onclick="menuSelectTrack('music/track-2.mp3',this)">
+        <span class="track-dot"></span>沉穩思考
+      </button>
+      <button class="music-track-btn" data-track="music/track-3.mp3" onclick="menuSelectTrack('music/track-3.mp3',this)">
+        <span class="track-dot"></span>活潑挑戰
+      </button>
+      <button class="music-track-btn" data-track="none" onclick="menuSelectTrack('none',this)">
+        <span class="track-dot"></span>無音樂
+      </button>
+    </div>
+  </div>
+
+  <!-- 開始按鈕 -->
+  <button id="menu-start-btn" onclick="startGame()">開始遊戲　▶</button>
+
+  <!-- 題庫編輯器入口（右下角，低調樣式） -->
+  <a id="menu-editor-btn" href="editor.html" target="_blank">
+    🧬 題庫編輯器
+  </a>
+</div>
+
+<!-- ══════════════════════════════════════
+     GAME SCREEN
+     ══════════════════════════════════════ -->
+<div id="game-screen">
+
+<!-- 返回選單按鈕（左上角） -->
+<button id="back-btn" onclick="returnToMenu()">← 返回選單</button>
+
+<!-- 紅血球尺寸參考徽章（右下角） -->
+<div id="rbc-ref">
+  <div id="rbc-badge">
+    <div id="rbc-ref-label">紅血球</div>
+    <div id="rbc-ref-ring">
+      <div id="rbc-ref-img-wrap">
+        <!-- 由 JS initRbcRef() 建立 -->
+      </div>
+    </div>
+    <div id="rbc-ref-sublabel">≈ 7–8 µm</div>
+  </div>
+</div>
+
+<div id="table">
+  <canvas id="wood-canvas"></canvas>
+
+  <!-- Mode A -->
+  <div id="hud">
+    <span class="hud-label">題目</span>
+    <span class="hud-text" id="q-text">—</span>
+    <span class="hud-sub"  id="q-sub">—</span>
+    <div class="score-group" id="score-badge">
+      <div class="score-item">
+        <span class="si-label">答對</span>
+        <span class="si-val si-correct" id="sc-ok">0</span>
+        <span class="si-unit">題</span>
+      </div>
+      <span class="score-divider">｜</span>
+      <div class="score-item">
+        <span class="si-label">答錯</span>
+        <span class="si-val si-wrong" id="sc-wrong">0</span>
+        <span class="si-unit">題</span>
+      </div>
+      <span class="score-divider">｜</span>
+      <div class="score-item" id="sc-streak-wrap">
+        <span id="sc-streak-icon">🔥</span>
+        <span class="si-label">連續</span>
+        <span class="si-val si-streak" id="sc-streak">0</span>
+      </div>
+    </div>
+  </div>
+  <div id="assembly-zone"></div>
+  <div id="bottom-bar">
+    <div id="layer-hint">把零件拖曳到中央圓形區域</div>
+    <button id="submit-btn" onclick="submitAnswer()" disabled>送出答案</button>
+  </div>
+
+  <!-- Mode B -->
+  <div id="mb-hud">
+    <span class="hud-label">找錯</span>
+    <span class="hud-text"  id="mb-q-text">—</span>
+    <span class="hud-sub"   id="mb-q-sub">—</span>
+    <div class="score-group" id="mb-score">
+      <div class="score-item">
+        <span class="si-label">答對</span>
+        <span class="si-val si-correct" id="mb-sc-ok">0</span>
+        <span class="si-unit">題</span>
+      </div>
+      <span class="score-divider">｜</span>
+      <div class="score-item">
+        <span class="si-label">答錯</span>
+        <span class="si-val si-wrong" id="mb-sc-wrong">0</span>
+        <span class="si-unit">題</span>
+      </div>
+      <span class="score-divider">｜</span>
+      <div class="score-item">
+        <span id="mb-sc-streak-icon">🔥</span>
+        <span class="si-label">連續</span>
+        <span class="si-val si-streak" id="mb-sc-streak">0</span>
+      </div>
+    </div>
+  </div>
+  <div id="mb-cell-wrap" style="display:none;"></div>
+  <div id="mb-bottom">
+    <div id="mb-hint">找出錯誤的零件，把正確的拖曳過去替換！</div>
+  </div>
+</div><!-- /#table -->
+
+<!-- ── 模式B 答題後說明覆蓋層 ── -->
+<div id="mb-result-overlay">
+  <div id="mb-feedback"></div>
+  <button id="mb-next-btn" onclick="mbNextQ()">下一題 →</button>
+</div>
+
+<!-- ══════════════════════════════════════
+     FEEDBACK PANEL (v4.2 — 照片輪播)
+     ══════════════════════════════════════ -->
+<div id="feedback">
+  <!-- Left: result text -->
+  <div id="fb-left">
+    <div id="fb-emoji">🎉</div>
+    <div id="fb-title">答對了！</div>
+    <div id="fb-cell-name"></div>
+    <div id="fb-cell-sub"></div>
+    <div id="fb-desc"></div>
+    <button id="fb-btn" onclick="fbAction()">—</button>
+  </div>
+  <!-- Right: photo carousel -->
+  <div id="fb-right">
+    <div id="fb-photo-wrap">
+      <img id="fb-photo" src="" alt="顯微鏡照片">
+      <div id="fb-photo-placeholder">
+        <div class="ph-icon">🔬</div>
+        <div>照片尚未設定<br><small>在 photos/ 資料夾放入圖片後，<br>於 questions.js 的 photos 陣列填寫路徑</small></div>
+      </div>
+      <button class="fb-arrow" id="fb-arrow-prev" onclick="fbPhotoNav(-1)">‹</button>
+      <button class="fb-arrow" id="fb-arrow-next" onclick="fbPhotoNav(+1)">›</button>
+    </div>
+    <div id="fb-bottom-bar">
+      <span id="fb-counter"></span>
+      <span id="fb-credit"></span>
+    </div>
+  </div>
+</div>
+
+</div><!-- /#game-screen -->
+</div><!-- /#app -->
+
+<script>
+/* ══════════════════════════════════════════════════════════
+   CONSTANTS
+   ══════════════════════════════════════════════════════════ */
+const seed = s => { let x=s+1; return ()=>{ x=Math.sin(x*127.1+311.7)*43758.5453; return x-Math.floor(x); }; };
+let PART_SIZE = 160;   // 動態計算，見 initTable()
+const LAYER_ORDER = ['body','cyto','nucleus','nucleolus','inclusion'];
+const LAYER_NAMES = { body:'細胞體', cyto:'細胞質', nucleus:'細胞核', nucleolus:'核仁', inclusion:'包含體' };
+
+/* ══════════════════════════════════════════════════════════
+   STATE
+   ══════════════════════════════════════════════════════════ */
+let difficulty    = 1;
+let currentMode   = 'A';
+let tableW = 0, tableH = 0;
+const AZ = { x:0, y:0, r:0 };
+let dragging = null, dragOffX = 0, dragOffY = 0;
+
+// Mode A
+let currentQ = 0, scoreOk = 0, scoreTotal = 0, scoreWrong = 0, streak = 0;
+let parts = [], placedLayers = {}, lastWasWrong = false;
+
+// Mode B
+let mbQ = 0, mbScoreOk = 0, mbScoreTotal = 0, mbScoreWrong = 0, mbStreak = 0;
+let mbErrLayer = '', mbAnswered = false, mbTriedWrong = false;
+let mbParts = [], mbDisplayed = {};
+
+// Menu
+let menuMode = 'A';   // 選單上選擇的模式
+let menuDiff = 1;     // 選單上選擇的難度
+
+/* ══════════════════════════════════════════════════════════
+   MUSIC SYSTEM
+   ══════════════════════════════════════════════════════════
+   檔案結構：
+     music/menu-bg.mp3   — 選單固定背景音樂
+     music/track-1.mp3   — 遊戲曲目一
+     music/track-2.mp3   — 遊戲曲目二
+     music/track-3.mp3   — 遊戲曲目三
+   ══════════════════════════════════════════════════════════ */
+
+const MENU_MUSIC   = 'music/menu-bg.mp3';
+const GAME_TRACKS  = [
+  'music/track-1.mp3',
+  'music/track-2.mp3',
+  'music/track-3.mp3',
+];
+
+let menuAudio  = null;   // 選單音樂 Audio 物件
+let gameAudio  = null;   // 遊戲音樂 Audio 物件
+let menuTrackChoice = 'random';   // 使用者在選單選的遊戲音樂
+let _fadeTimer = null;
+
+/** 建立並播放一個 Audio，loop，帶淡入效果 */
+function audioPlay(src, fadeDuration = 800) {
+  const audio = new Audio(src);
+  audio.loop  = true;
+  audio.volume = 0;
+  audio.play().catch(() => {});   // 某些瀏覽器需使用者互動才能播放，靜默忽略錯誤
+  // 淡入
+  const step = 16;
+  const target = 1.0;
+  const inc = target / (fadeDuration / step);
+  const timer = setInterval(() => {
+    audio.volume = Math.min(target, audio.volume + inc);
+    if (audio.volume >= target) clearInterval(timer);
+  }, step);
+  return audio;
+}
+
+/** 淡出並停止一個 Audio */
+function audioFadeOut(audio, fadeDuration = 600, onDone) {
+  if (!audio) { if (onDone) onDone(); return; }
+  clearInterval(_fadeTimer);
+  const step = 16;
+  const dec  = audio.volume / (fadeDuration / step);
+  _fadeTimer = setInterval(() => {
+    audio.volume = Math.max(0, audio.volume - dec);
+    if (audio.volume <= 0) {
+      clearInterval(_fadeTimer);
+      audio.pause();
+      audio.src = '';
+      if (onDone) onDone();
+    }
+  }, step);
+}
+
+/** 決定本局遊戲要播哪首曲（random 時隨機選） */
+function resolveGameTrack() {
+  if (menuTrackChoice === 'none')   return null;
+  if (menuTrackChoice === 'random') {
+    return GAME_TRACKS[Math.floor(Math.random() * GAME_TRACKS.length)];
+  }
+  return menuTrackChoice;
+}
+
+/** 切換到遊戲音樂（選單淡出 → 遊戲淡入） */
+function switchToGameMusic() {
+  const track = resolveGameTrack();
+  audioFadeOut(menuAudio, 500, () => {
+    menuAudio = null;
+    if (track) gameAudio = audioPlay(track, 800);
+  });
+}
+
+/** 切換回選單音樂（遊戲淡出 → 選單淡入） */
+function switchToMenuMusic() {
+  audioFadeOut(gameAudio, 500, () => {
+    gameAudio = null;
+    menuAudio = audioPlay(MENU_MUSIC, 800);
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   MENU
+   ══════════════════════════════════════════════════════════ */
+
+function menuSelectMode(m) {
+  menuMode = m;
+  document.getElementById('menu-card-a').classList.toggle('selected', m === 'A');
+  document.getElementById('menu-card-b').classList.toggle('selected', m === 'B');
+}
+
+function menuSelectDiff(d, btn) {
+  menuDiff = Number(d);   // 強制轉數字，防止 inline onclick 傳入字串
+  document.querySelectorAll('.menu-diff-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+}
+
+function menuSelectTrack(track, btn) {
+  menuTrackChoice = track;
+  document.querySelectorAll('.music-track-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+}
+
+/** 更新模式A分數顯示 */
+function updateScore() {
+  document.getElementById('sc-ok').textContent     = scoreOk;
+  document.getElementById('sc-wrong').textContent  = scoreWrong;
+  document.getElementById('sc-streak').textContent = streak;
+  const icon = document.getElementById('sc-streak-icon');
+  const val  = document.getElementById('sc-streak');
+  if (streak >= 3) {
+    icon.textContent = '🔥';
+    val.className = 'si-val si-streak';
+  } else if (streak > 0) {
+    icon.textContent = '✨';
+    val.className = 'si-val si-streak';
+  } else {
+    icon.textContent = '💤';
+    val.className = 'si-val si-streak-0';
+  }
+}
+
+/** 更新模式B分數顯示 */
+function updateMbScore() {
+  document.getElementById('mb-sc-ok').textContent     = mbScoreOk;
+  document.getElementById('mb-sc-wrong').textContent  = mbScoreWrong;
+  document.getElementById('mb-sc-streak').textContent = mbStreak;
+  const icon = document.getElementById('mb-sc-streak-icon');
+  const val  = document.getElementById('mb-sc-streak');
+  if (mbStreak >= 3) {
+    icon.textContent = '🔥';
+    val.className = 'si-val si-streak';
+  } else if (mbStreak > 0) {
+    icon.textContent = '✨';
+    val.className = 'si-val si-streak';
+  } else {
+    icon.textContent = '💤';
+    val.className = 'si-val si-streak-0';
+  }
+}
+async function initRbcRef() {
+  const wrap = document.getElementById('rbc-ref-img-wrap');
+  const ring = document.getElementById('rbc-ref-ring');
+  wrap.innerHTML = '';
+
+  // 徽章大小：PART_SIZE 的 75%
+  const sz = Math.round(PART_SIZE * 0.75);
+
+  // ring 設定圓形尺寸
+  ring.style.width  = sz + 'px';
+  ring.style.height = sz + 'px';
+
+  // img-wrap 填滿 ring
+  wrap.style.cssText = `width:${sz}px;height:${sz}px;position:relative;`;
+
+  // buildPartEl：body 層 B01，玻璃氣泡效果
+  const inner = await buildPartEl('body', 'B01', 'B01', sz);
+  wrap.appendChild(inner);
+}
+
+function startGame() {
+  difficulty  = menuDiff;
+  currentMode = menuMode;
+
+  // 重置分數與題序，並建立本局隨機題序
+  scoreOk = 0; scoreTotal = 0; scoreWrong = 0; streak = 0; currentQ = 0; lastWasWrong = false;
+  buildShuffledPool();
+  mbQ = 0; mbScoreOk = 0; mbScoreTotal = 0; mbScoreWrong = 0; mbStreak = 0;
+  updateScore();
+  updateMbScore();
+
+  // 初始化遊戲桌面
+  initTable();
+
+  // 音樂切換：選單 → 遊戲
+  switchToGameMusic();
+
+  // 滑動動畫
+  document.getElementById('menu').classList.add('slide-out-left');
+  document.getElementById('game-screen').classList.add('slide-in');
+
+  // 動畫結束後啟動遊戲
+  setTimeout(() => {
+    if (currentMode === 'A') {
+      const q = getCurrentQ();
+      document.getElementById('q-text').textContent = q.text;
+      document.getElementById('q-sub').textContent  = q.sub;
+      document.getElementById('mb-cell-wrap').style.display = 'none';
+      document.getElementById('mb-hud').classList.remove('show');
+      document.getElementById('mb-bottom').classList.remove('show');
+      document.getElementById('hud').style.display = '';
+      document.getElementById('assembly-zone').style.display = '';
+      document.getElementById('bottom-bar').style.display = '';
+      document.getElementById('rbc-ref').style.display = '';
+      updateBottomBar();
+      initRbcRef();
+      spawnParts();
+    } else {
+      document.getElementById('hud').style.display = 'none';
+      document.getElementById('assembly-zone').style.display = 'none';
+      document.getElementById('bottom-bar').style.display = 'none';
+      document.getElementById('rbc-ref').style.display = 'none';
+      document.getElementById('mb-hud').classList.add('show');
+      document.getElementById('mb-bottom').classList.add('show');
+      mbStartSession();
+    }
+  }, 300);
+}
+
+function returnToMenu() {
+  // 清除遊戲狀態
+  document.getElementById('feedback').className = '';
+  document.getElementById('mb-result-overlay').classList.remove('show');
+  parts.forEach(p => { if (p.el.parentNode) p.el.parentNode.removeChild(p.el); });
+  parts = []; placedLayers = {};
+  mbParts.forEach(p => { if (p.el.parentNode) p.el.parentNode.removeChild(p.el); });
+  mbParts = [];
+
+  // 音樂切換：遊戲 → 選單
+  switchToMenuMusic();
+
+  // 滑回動畫
+  document.getElementById('game-screen').classList.remove('slide-in');
+  document.getElementById('menu').classList.remove('slide-out-left');
+}
+
+/* ══════════════════════════════════════════════════════════
+   IMAGE CACHE  (v4)
+   ══════════════════════════════════════════════════════════ */
+const imgCache = {};
+
+/**
+ * 嘗試載入圖片，成功回傳 HTMLImageElement，失敗回傳 null。
+ * 結果會被快取，避免重複請求。
+ */
+function loadImg(src) {
+  if (!src) return Promise.resolve(null);
+  if (imgCache[src] !== undefined) return Promise.resolve(imgCache[src]);
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload  = () => { imgCache[src] = img; resolve(img); };
+    img.onerror = () => { imgCache[src] = null; resolve(null); };
+    img.src = src;
+  });
+}
+
+/**
+ * 取得零件定義
+ */
+function getPartDef(layer, partId) {
+  return (PARTS_DEF[layer] || []).find(p => p.id === partId) || null;
+}
+
+/* ══════════════════════════════════════════════════════════
+   CANVAS DRAWING  (fallback，圖片不存在時使用)
+   ══════════════════════════════════════════════════════════ */
+function sG(ctx,cx,cy,cr,n,gr,cols,rng){
+  for(let i=0;i<n;i++){
+    const a=rng()*Math.PI*2,d=rng()*cr*0.84;
+    const gx=cx+Math.cos(a)*d,gy=cy+Math.sin(a)*d;
+    const g2=ctx.createRadialGradient(gx-gr*0.3,gy-gr*0.3,0.5,gx,gy,gr);
+    g2.addColorStop(0,cols[0]);g2.addColorStop(1,cols[1]);
+    ctx.beginPath();ctx.arc(gx,gy,gr*(0.75+rng()*0.5),0,Math.PI*2);
+    ctx.fillStyle=g2;ctx.globalAlpha=0.68+rng()*0.3;ctx.fill();
+  }ctx.globalAlpha=1;
+}
+function dN(ctx,cx,cy,r,light){
+  const g=ctx.createRadialGradient(cx-r*0.28,cy-r*0.32,r*0.05,cx,cy,r);
+  g.addColorStop(0,light?'#AEA0DC':'#7B68BE');g.addColorStop(1,light?'#7055B0':'#3E2880');
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+  ctx.strokeStyle=light?'#8870C8':'#2C1868';ctx.lineWidth=1.1;ctx.stroke();
+  const nh=ctx.createRadialGradient(cx-r*0.25,cy-r*0.3,0.5,cx,cy,r*0.55);
+  nh.addColorStop(0,'rgba(255,255,255,0.32)');nh.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=nh;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
+}
+function dBand(ctx,cx,cy,cr){
+  const g=ctx.createRadialGradient(cx-cr*0.22,cy-cr*0.1,2,cx,cy,cr*0.45);
+  g.addColorStop(0,'#7B68BE');g.addColorStop(1,'#3E2880');
+  ctx.beginPath();
+  ctx.moveTo(cx-cr*0.5,cy-cr*0.05);
+  ctx.bezierCurveTo(cx-cr*0.26,cy-cr*0.26,cx+cr*0.26,cy-cr*0.24,cx+cr*0.5,cy-cr*0.04);
+  ctx.bezierCurveTo(cx+cr*0.44,cy+cr*0.13,cx-cr*0.32,cy+cr*0.18,cx-cr*0.5,cy+cr*0.08);
+  ctx.closePath();ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='#2C1868';ctx.lineWidth=1.1;ctx.stroke();
+}
+function dHorse(ctx,cx,cy,cr){
+  const s=cr*0.013;
+  const g=ctx.createRadialGradient(cx+8*s,cy-18*s,3,cx+12*s,cy,32*s);
+  g.addColorStop(0,'#8878C8');g.addColorStop(1,'#3E2880');
+  ctx.beginPath();
+  ctx.moveTo(cx-10*s,cy+26*s);
+  ctx.bezierCurveTo(cx-30*s,cy+20*s,cx-34*s,cy,cx-24*s,cy-18*s);
+  ctx.bezierCurveTo(cx-14*s,cy-32*s,cx+14*s,cy-34*s,cx+26*s,cy-22*s);
+  ctx.bezierCurveTo(cx+38*s,cy-8*s,cx+34*s,cy+14*s,cx+14*s,cy+26*s);
+  ctx.bezierCurveTo(cx+8*s,cy+28*s,cx,cy+18*s,cx+4*s,cy+10*s);
+  ctx.bezierCurveTo(cx+18*s,cy+6*s,cx+24*s,cy-2*s,cx+20*s,cy-14*s);
+  ctx.bezierCurveTo(cx+12*s,cy-26*s,cx-4*s,cy-26*s,cx-12*s,cy-14*s);
+  ctx.bezierCurveTo(cx-20*s,cy-4*s,ctx-18*s||cx-18*s,cy+10*s,cx-8*s,cy+18*s);
+  ctx.closePath();ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='#2C1868';ctx.lineWidth=1.1;ctx.stroke();
+}
+
+function drawPartOnCtx(ctx, layer, partId, bodyId, sz) {
+  const cx=sz/2, cy=sz/2;
+  const bp=PARTS_DEF.body.find(p=>p.id===bodyId)||PARTS_DEF.body[1];
+  const r=(sz/2-5)*bp.size;
+
+  if (layer==='body') {
+    const p=PARTS_DEF.body.find(x=>x.id===partId)||bp;
+    const rr=(sz/2-5)*p.size;
+    const g=ctx.createRadialGradient(cx-rr*0.25,cy-rr*0.28,rr*0.05,cx,cy,rr*1.05);
+    g.addColorStop(0,p.col[0]);g.addColorStop(0.55,p.col[1]);g.addColorStop(1,p.col[2]);
+    ctx.beginPath();ctx.arc(cx,cy,rr,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    ctx.strokeStyle=p.edge;ctx.lineWidth=1.8;ctx.stroke();
+    const inner=ctx.createRadialGradient(cx,cy,rr*0.1,cx,cy,rr*0.46);
+    inner.addColorStop(0,'rgba(255,252,248,0.6)');inner.addColorStop(1,'rgba(255,238,230,0)');
+    ctx.beginPath();ctx.arc(cx,cy,rr*0.46,0,Math.PI*2);ctx.fillStyle=inner;ctx.fill();
+  } else if (layer==='cyto') {
+    const cp=PARTS_DEF.cyto.find(x=>x.id===partId);if(!cp)return;
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+    const rng=seed(partId.charCodeAt(1)*37+17);
+    if(cp.type==='neutro'){
+      // 細緻淡紫粉顆粒
+      sG(ctx,cx,cy,r,80,3.0,['#DDA8C0','#BE80A0'],rng);
+    } else if(cp.type==='eosino'){
+      // 粗大橘紅顆粒
+      sG(ctx,cx,cy,r,30,6.0,['#F09060','#C85830'],rng);
+    } else if(cp.type==='baso'){
+      // 深紫大顆粒，遮蓋核
+      sG(ctx,cx,cy,r,22,7.5,['#6848C0','#3828A0'],rng);
+    } else if(cp.type==='mono'){
+      // 灰藍空泡質
+      const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+      bg.addColorStop(0,'rgba(180,200,220,0.30)');bg.addColorStop(1,'rgba(140,168,190,0.18)');
+      ctx.fillStyle=bg;ctx.fillRect(0,0,sz,sz);
+      [[cx-r*0.22,cy-r*0.15,r*0.13],[cx+r*0.18,cy+r*0.12,r*0.11],[cx-r*0.08,cy+r*0.20,r*0.09]].forEach(([vx,vy,vr])=>{
+        ctx.beginPath();ctx.arc(vx,vy,vr,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,0.68)';ctx.fill();
+        ctx.strokeStyle='rgba(140,170,190,0.4)';ctx.lineWidth=0.7;ctx.stroke();
+      });
+    } else if(cp.type==='mixed-granule'){
+      // 淡粉混合顆粒（中幼粒/早幼粒）：淡粉底色 + 混合深淺顆粒
+      const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+      bg.addColorStop(0,'rgba(255,220,220,0.22)');bg.addColorStop(1,'rgba(240,200,210,0.10)');
+      ctx.fillStyle=bg;ctx.fillRect(0,0,sz,sz);
+      sG(ctx,cx,cy,r,28,4.5,['#C878A8','#A04880'],rng);  // 初級顆粒（深紫紅）
+      sG(ctx,cx,cy,r,40,2.8,['#E8A8C0','#C888A8'],rng);  // 次級顆粒（淡粉）
+    } else if(cp.type==='reactive-lymph'){
+      // 深藍豐富質，周邊更深
+      const bg=ctx.createRadialGradient(cx,cy,r*0.2,cx,cy,r);
+      bg.addColorStop(0,'rgba(80,100,190,0.28)');bg.addColorStop(1,'rgba(50,60,160,0.55)');
+      ctx.fillStyle=bg;ctx.fillRect(0,0,sz,sz);
+    } else if(cp.type==='plasma'){
+      // 深藍偏心質 + 核周暈
+      const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+      bg.addColorStop(0,'rgba(60,80,180,0.45)');bg.addColorStop(1,'rgba(40,55,150,0.60)');
+      ctx.fillStyle=bg;ctx.fillRect(0,0,sz,sz);
+      // 核周暈（Golgi zone）
+      const hof=ctx.createRadialGradient(cx+r*0.15,cy,0,cx+r*0.15,cy,r*0.28);
+      hof.addColorStop(0,'rgba(255,248,220,0.70)');hof.addColorStop(1,'rgba(255,248,220,0.00)');
+      ctx.fillStyle=hof;ctx.fillRect(0,0,sz,sz);
+    } else if(cp.type==='degenerated'){
+      // 退化蒼白質
+      const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+      bg.addColorStop(0,'rgba(220,210,200,0.30)');bg.addColorStop(1,'rgba(200,188,175,0.18)');
+      ctx.fillStyle=bg;ctx.fillRect(0,0,sz,sz);
+      // 模糊空泡
+      sG(ctx,cx,cy,r,8,r*0.12,['rgba(255,255,255,0.5)','rgba(255,255,255,0.1)'],rng);
+    }
+    ctx.restore();
+
+  } else if (layer==='nucleus') {
+    const np=PARTS_DEF.nucleus.find(x=>x.id===partId);if(!np||np.type==='none')return;
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+
+    if(np.type==='small-round'){
+      dN(ctx,cx,cy,r*0.72,false);
+    } else if(np.type==='large-round'){
+      dN(ctx,cx,cy,r*0.62,true);
+    } else if(np.type==='cartwheel'){
+      // 車輪狀核（漿細胞）：偏心圓 + 輻射染色質
+      const nx=cx+r*0.18, ny=cy+r*0.10, nr=r*0.42;
+      dN(ctx,nx,ny,nr,false);
+      ctx.save();ctx.beginPath();ctx.arc(nx,ny,nr,0,Math.PI*2);ctx.clip();
+      ctx.strokeStyle='rgba(255,255,255,0.22)';ctx.lineWidth=1.2;
+      for(let a=0;a<6;a++){
+        const ang=a*Math.PI/3;
+        ctx.beginPath();ctx.moveTo(nx,ny);
+        ctx.lineTo(nx+Math.cos(ang)*nr,ny+Math.sin(ang)*nr);ctx.stroke();
+      }
+      ctx.restore();
+    } else if(np.type==='irregular'){
+      // 不規則折疊核（反應性淋巴球）
+      const g=ctx.createRadialGradient(cx-r*0.08,cy-r*0.08,r*0.05,cx,cy,r*0.58);
+      g.addColorStop(0,'#8878C0');g.addColorStop(1,'#3E2880');
+      ctx.beginPath();
+      ctx.moveTo(cx-r*0.50,cy-r*0.10);
+      ctx.bezierCurveTo(cx-r*0.40,cy-r*0.52,cx+r*0.28,cy-r*0.50,cx+r*0.50,cy-r*0.08);
+      ctx.bezierCurveTo(cx+r*0.42,cy+r*0.38,cx+r*0.08,cy+r*0.46,cx-r*0.20,cy+r*0.40);
+      ctx.bezierCurveTo(cx-r*0.52,cy+r*0.30,cx-r*0.60,cy+r*0.10,cx-r*0.50,cy-r*0.10);
+      ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='#2C1868';ctx.lineWidth=1.1;ctx.stroke();
+    } else if(np.type==='band'){
+      dBand(ctx,cx,cy,r);
+    } else if(np.type==='segmented'){
+      // 分葉核 3–4 葉
+      const lb=[[cx-r*0.30,cy+r*0.08,r*0.27],[cx,cy-r*0.10,r*0.29],[cx+r*0.30,cy+r*0.08,r*0.25]];
+      lb.forEach(([lx,ly,lr])=>dN(ctx,lx,ly,lr,false));
+      ctx.strokeStyle='#5A40A8';ctx.lineWidth=2.2;ctx.lineCap='round';
+      for(let i=0;i<lb.length-1;i++){
+        ctx.beginPath();ctx.moveTo(lb[i][0],lb[i][1]);
+        ctx.quadraticCurveTo((lb[i][0]+lb[i+1][0])/2,(lb[i][1]+lb[i+1][1])/2-5,lb[i+1][0],lb[i+1][1]);
+        ctx.stroke();
+      }
+    } else if(np.type==='bilobed'){
+      [[cx-r*0.28,cy,r*0.26],[cx+r*0.28,cy,r*0.26]].forEach(([lx,ly,lr])=>dN(ctx,lx,ly,lr,false));
+      ctx.strokeStyle='#5A40A8';ctx.lineWidth=2.2;ctx.lineCap='round';
+      ctx.beginPath();ctx.moveTo(cx-r*0.02,cy);ctx.lineTo(cx+r*0.02,cy);ctx.stroke();
+    } else if(np.type==='horseshoe'){
+      dHorse(ctx,cx,cy,r);
+    } else if(np.type==='kidney'){
+      // 腎形核（晚幼粒球）：比馬蹄更淺的凹陷
+      const g=ctx.createRadialGradient(cx,cy-r*0.10,r*0.05,cx,cy,r*0.52);
+      g.addColorStop(0,'#8070BC');g.addColorStop(1,'#3E2880');
+      ctx.beginPath();
+      ctx.moveTo(cx-r*0.46,cy-r*0.08);
+      ctx.bezierCurveTo(cx-r*0.44,cy-r*0.44,cx+r*0.44,cy-r*0.44,cx+r*0.46,cy-r*0.08);
+      ctx.bezierCurveTo(cx+r*0.46,cy+r*0.32,cx+r*0.16,cy+r*0.28,cx+r*0.02,cy+r*0.08);
+      ctx.bezierCurveTo(cx-r*0.02,cy+r*0.08,cx-r*0.16,cy+r*0.28,cx-r*0.46,cy+r*0.32);
+      ctx.closePath();
+      ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='#2C1868';ctx.lineWidth=1.1;ctx.stroke();
+    } else if(np.type==='round-mid'){
+      // 圓形中等核（中幼粒/早幼粒）：比 large-round 略深，一側略扁
+      dN(ctx,cx,cy+r*0.06,r*0.56,true);
+    } else if(np.type==='pyknotic'){
+      // 退化固縮核：不規則深色碎塊
+      const rng2=seed(77);
+      [[cx-r*0.12,cy-r*0.08,r*0.22],[cx+r*0.14,cy+r*0.06,r*0.16],[cx-r*0.04,cy+r*0.18,r*0.12]].forEach(([px,py,pr])=>{
+        const pg=ctx.createRadialGradient(px,py,1,px,py,pr);
+        pg.addColorStop(0,'#4A3090');pg.addColorStop(1,'#1E0848');
+        ctx.beginPath();ctx.arc(px,py,pr*(0.8+rng2()*0.3),0,Math.PI*2);
+        ctx.fillStyle=pg;ctx.globalAlpha=0.85+rng2()*0.15;ctx.fill();
+      });
+      ctx.globalAlpha=1;
+    }
+    ctx.restore();
+
+  } else if (layer==='nucleolus') {
+    const np=PARTS_DEF.nucleolus.find(x=>x.id===partId);if(!np||np.type==='none')return;
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+    const dNU=(nx,ny,nr)=>{
+      const ng=ctx.createRadialGradient(nx-nr*0.3,ny-nr*0.3,0.5,nx,ny,nr);
+      ng.addColorStop(0,'#FFFFFF');ng.addColorStop(0.5,'#E8E0FF');ng.addColorStop(1,'#C0B0F0');
+      ctx.beginPath();ctx.arc(nx,ny,nr,0,Math.PI*2);ctx.fillStyle=ng;ctx.fill();
+      ctx.strokeStyle='#A898D8';ctx.lineWidth=0.8;ctx.stroke();
+    };
+    if(np.type==='small'){
+      dNU(cx+r*0.14,cy-r*0.10,r*0.10);
+    } else if(np.type==='medium'){
+      dNU(cx-r*0.14,cy-r*0.10,r*0.12);
+      dNU(cx+r*0.16,cy+r*0.08,r*0.10);
+    } else if(np.type==='prominent'){
+      // 明顯大核仁（芽細胞）：1–3 個，明顯
+      dNU(cx-r*0.16,cy-r*0.12,r*0.17);
+      dNU(cx+r*0.18,cy+r*0.06,r*0.13);
+      dNU(cx-r*0.04,cy+r*0.20,r*0.10);
+    }
+    ctx.restore();
+
+  } else if (layer==='inclusion') {
+    const ip=PARTS_DEF.inclusion.find(x=>x.id===partId);if(!ip||ip.type==='none')return;
+    ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+    if(ip.type==='azurophilic'){
+      // 嗜天青顆粒（初級顆粒）：深紫紅大顆粒
+      const rng3=seed(42);
+      sG(ctx,cx,cy,r,18,r*0.09,['#B04880','#802050'],rng3);
+    } else if(ip.type==='auer'){
+      // Auer rod：針狀晶體
+      ctx.save();ctx.translate(cx+r*0.18,cy+r*0.22);ctx.rotate(-0.42);
+      const rg=ctx.createLinearGradient(-4,-r*0.36,4,r*0.08);
+      rg.addColorStop(0,'#E87090');rg.addColorStop(0.5,'#C04868');rg.addColorStop(1,'#902040');
+      ctx.beginPath();ctx.roundRect(-4,-r*0.36,8,r*0.44,4);
+      ctx.fillStyle=rg;ctx.fill();ctx.strokeStyle='#780030';ctx.lineWidth=0.8;ctx.stroke();
+      ctx.restore();
+    } else if(ip.type==='dohle'){
+      // Döhle body：淡藍橢圓
+      const dg=ctx.createRadialGradient(cx-r*0.52,cy-r*0.32,1,cx-r*0.52,cy-r*0.32,r*0.17);
+      dg.addColorStop(0,'#C8D8EC');dg.addColorStop(1,'#8898B8');
+      ctx.beginPath();ctx.ellipse(cx-r*0.52,cy-r*0.32,r*0.18,r*0.12,0.4,0,Math.PI*2);
+      ctx.fillStyle=dg;ctx.globalAlpha=0.82;ctx.fill();
+      ctx.strokeStyle='#7888A8';ctx.lineWidth=0.8;ctx.stroke();ctx.globalAlpha=1;
+    } else if(ip.type==='toxic-granule'){
+      // 毒性顆粒：深紫黑粗大顆粒
+      const rng4=seed(88);
+      sG(ctx,cx,cy,r,14,r*0.10,['#504070','#2A1848'],rng4);
+    }
+    ctx.restore();
+  }
+
+  // Highlight rim
+  const bp2 = layer==='body' ? (PARTS_DEF.body.find(x=>x.id===partId)||bp) : bp;
+  const rHL = (sz/2-5) * (layer==='body' ? bp2.size : bp.size);
+  const hl = ctx.createRadialGradient(cx-rHL*0.22,cy-rHL*0.28,1,cx-rHL*0.08,cy-rHL*0.1,rHL*0.6);
+  hl.addColorStop(0,'rgba(255,255,255,0.55)');
+  hl.addColorStop(0.5,'rgba(255,255,255,0.15)');
+  hl.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.save();ctx.beginPath();ctx.arc(cx,cy,rHL,0,Math.PI*2);ctx.clip();
+  ctx.fillStyle=hl;ctx.fillRect(0,0,sz,sz);ctx.restore();
+}
+
+/* ── 底層 Canvas：暗邊框 + 磁石暈染 ── */
+function drawBaseRim(cv) {
+  const ctx = cv.getContext('2d');
+  const w=cv.width, h=cv.height, cx=w/2, cy=h/2, r=w/2-2;
+  ctx.clearRect(0,0,w,h);
+  // 深色邊緣暈染（製造深度感）
+  const rim = ctx.createRadialGradient(cx,cy,r*0.60,cx,cy,r);
+  rim.addColorStop(0,  'rgba(0,0,0,0.00)');
+  rim.addColorStop(0.75,'rgba(0,0,0,0.18)');
+  rim.addColorStop(1,  'rgba(0,0,0,0.55)');
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.fillStyle=rim; ctx.fill();
+  // 細邊框線
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.strokeStyle='rgba(60,38,12,0.45)'; ctx.lineWidth=2.5; ctx.stroke();
+}
+
+/* ── 頂層 Canvas：玻璃氣泡高光 ── */
+function drawBubbleGlass(cv) {
+  const ctx = cv.getContext('2d');
+  const w=cv.width, h=cv.height, cx=w/2, cy=h/2, r=w/2-2;
+  ctx.clearRect(0,0,w,h);
+
+  // 1. 頂部橢圓高光（主要亮點，模擬球面反光）
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.clip();
+  const hl = ctx.createRadialGradient(
+    cx - r*0.20, cy - r*0.28, r*0.01,
+    cx - r*0.08, cy - r*0.08, r*0.62
+  );
+  hl.addColorStop(0,   'rgba(255,255,255,0.62)');
+  hl.addColorStop(0.30,'rgba(255,255,255,0.20)');
+  hl.addColorStop(0.60,'rgba(255,255,255,0.04)');
+  hl.addColorStop(1,   'rgba(255,255,255,0.00)');
+  ctx.fillStyle = hl;
+  ctx.fillRect(0,0,w,h);
+  ctx.restore();
+
+  // 2. 左上小亮斑（第二反射點）
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.clip();
+  const sp = ctx.createRadialGradient(
+    cx - r*0.42, cy - r*0.40, 0,
+    cx - r*0.42, cy - r*0.40, r*0.22
+  );
+  sp.addColorStop(0,  'rgba(255,255,255,0.45)');
+  sp.addColorStop(0.5,'rgba(255,255,255,0.10)');
+  sp.addColorStop(1,  'rgba(255,255,255,0.00)');
+  ctx.fillStyle = sp;
+  ctx.fillRect(0,0,w,h);
+  ctx.restore();
+
+  // 3. 底部極淡反光（地面反射，讓球體有立體感）
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.clip();
+  const bot = ctx.createRadialGradient(cx,cy+r*0.55,0, cx,cy+r*0.55,r*0.50);
+  bot.addColorStop(0,  'rgba(255,245,220,0.18)');
+  bot.addColorStop(0.6,'rgba(255,245,220,0.04)');
+  bot.addColorStop(1,  'rgba(255,245,220,0.00)');
+  ctx.fillStyle = bot;
+  ctx.fillRect(0,0,w,h);
+  ctx.restore();
+
+  // 4. 環形內發光（讓邊緣有透明感）
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.clip();
+  const ring = ctx.createRadialGradient(cx,cy,r*0.72,cx,cy,r*0.99);
+  ring.addColorStop(0,  'rgba(255,255,255,0.00)');
+  ring.addColorStop(0.6,'rgba(255,255,255,0.06)');
+  ring.addColorStop(1,  'rgba(255,255,255,0.18)');
+  ctx.fillStyle = ring;
+  ctx.fillRect(0,0,w,h);
+  ctx.restore();
+
+  // 5. 外圈細亮邊（玻璃折射邊）
+  ctx.beginPath(); ctx.arc(cx,cy,r-1,0,Math.PI*2);
+  const edgeGrad = ctx.createLinearGradient(cx-r,cy-r, cx+r,cy+r);
+  edgeGrad.addColorStop(0,   'rgba(255,255,255,0.40)');
+  edgeGrad.addColorStop(0.45,'rgba(255,255,255,0.08)');
+  edgeGrad.addColorStop(1,   'rgba(255,255,255,0.00)');
+  ctx.strokeStyle = edgeGrad;
+  ctx.lineWidth = 1.5; ctx.stroke();
+}
+
+/* ══════════════════════════════════════════════════════════
+   PART ELEMENT BUILDER  (v4.1: 三層玻璃氣泡架構)
+   ══════════════════════════════════════════════════════════
+   層次由下到上：
+     [0] cvBase  — 底層 Canvas：暗邊框 + 磁石暈染
+     [1] cvFall  — Canvas fallback 繪製（PNG 存在時隱藏）
+     [2] imgEl   — PNG 圖片（有圖才加）
+     [3] cvGlass — 頂層 Canvas：玻璃氣泡高光（永遠在最上）
+   ══════════════════════════════════════════════════════════ */
+async function buildPartEl(layer, partId, bodyId, sz) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = `position:relative;width:${sz}px;height:${sz}px;`;
+
+  const cvStyle = `position:absolute;inset:0;width:${sz}px;height:${sz}px;pointer-events:none;`;
+
+  // ── 層 0：底層暗邊框 ──
+  const cvBase = document.createElement('canvas');
+  cvBase.width = sz; cvBase.height = sz;
+  cvBase.style.cssText = cvStyle + 'z-index:1;';
+  drawBaseRim(cvBase);
+  wrap.appendChild(cvBase);
+
+  // ── 層 1：Canvas fallback 繪製 ──
+  const cvFall = document.createElement('canvas');
+  cvFall.width = sz; cvFall.height = sz;
+  cvFall.style.cssText = cvStyle + 'z-index:2;';
+  drawPartOnCtx(cvFall.getContext('2d'), layer, partId, bodyId, sz);
+  wrap.appendChild(cvFall);
+
+  // ── 層 2：PNG 圖片（若存在） ──
+  const def = getPartDef(layer, partId);
+  if (def && def.img) {
+    const img = await loadImg(def.img);
+    if (img) {
+      // 圖片存在 → 隱藏 fallback canvas，加入 PNG
+      cvFall.style.display = 'none';
+      const imgEl = document.createElement('img');
+      imgEl.src = def.img;
+      imgEl.className = 'part-img';
+      imgEl.style.cssText += 'z-index:3;';
+      wrap.appendChild(imgEl);
+    }
+  }
+
+  // ── 層 3：頂層玻璃氣泡（永遠在最上） ──
+  const cvGlass = document.createElement('canvas');
+  cvGlass.width = sz; cvGlass.height = sz;
+  cvGlass.style.cssText = cvStyle + 'z-index:10;';
+  drawBubbleGlass(cvGlass);
+  wrap.appendChild(cvGlass);
+
+  return wrap;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TABLE & WOOD
+   ══════════════════════════════════════════════════════════ */
+function initTable(){
+  const t = document.getElementById('table');
+  tableW = t.offsetWidth; tableH = t.offsetHeight;
+
+  // 零件大小：螢幕短邊的 13%，最小 120px，最大 180px
+  PART_SIZE = Math.round(Math.max(120, Math.min(180, Math.min(tableW, tableH) * 0.13)));
+
+  AZ.x = tableW/2; AZ.y = tableH/2+10; AZ.r = Math.min(tableW,tableH)*0.20;
+  const az = document.getElementById('assembly-zone');
+  az.style.width  = AZ.r*2+'px'; az.style.height = AZ.r*2+'px';
+  az.style.left   = AZ.x+'px';   az.style.top    = AZ.y+'px';
+  const cw = document.getElementById('mb-cell-wrap');
+  const mbSz = AZ.r*2;
+  cw.style.width  = mbSz+'px'; cw.style.height = mbSz+'px';
+  cw.style.left   = AZ.x+'px'; cw.style.top    = AZ.y+'px';
+  drawWood();
+}
+function drawWood(){
+  const cv = document.getElementById('wood-canvas');
+  cv.width = tableW; cv.height = tableH;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0,0,tableW,tableH);
+  const rng = seed(77);
+  for(let i=0;i<80;i++){
+    const y=rng()*tableH, ctrl=rng()*24-12;
+    ctx.beginPath();ctx.moveTo(0,y);
+    ctx.quadraticCurveTo(tableW/2,y+ctrl,tableW,y+(rng()*8-4));
+    ctx.strokeStyle=`rgba(${rng()>0.5?'30,12,2':'255,210,140'},${0.07+rng()*0.13})`;
+    ctx.lineWidth=0.4+rng()*1.4;ctx.stroke();
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   DRAG SYSTEM
+   ══════════════════════════════════════════════════════════ */
+function addDrag(el, pObj, onDrop){
+  const onStart=(ex,ey)=>{
+    if(dragging)return; dragging=pObj;
+    const rect=el.getBoundingClientRect();
+    dragOffX=ex-rect.left-PART_SIZE/2; dragOffY=ey-rect.top-PART_SIZE/2;
+    el.classList.add('dragging'); el.style.zIndex=2000;
+    el.style.transform=`rotate(${pObj.rot}deg) scale(1.07)`;
+    const zoneId=currentMode==='A'?'assembly-zone':'mb-cell-wrap';
+    document.getElementById(zoneId).classList.add('glow');
+  };
+  const onMove=(ex,ey)=>{
+    if(dragging!==pObj)return;
+    const tr=document.getElementById('table').getBoundingClientRect();
+    const nx=ex-tr.left-PART_SIZE/2-dragOffX, ny=ey-tr.top-PART_SIZE/2-dragOffY;
+    el.style.left=nx+'px'; el.style.top=ny+'px';
+    pObj.x=nx+PART_SIZE/2; pObj.y=ny+PART_SIZE/2;
+  };
+  const onEnd=()=>{
+    if(dragging!==pObj)return; dragging=null;
+    el.classList.remove('dragging');
+    const zoneId=currentMode==='A'?'assembly-zone':'mb-cell-wrap';
+    document.getElementById(zoneId).classList.remove('glow');
+    const dx=pObj.x-AZ.x, dy=pObj.y-AZ.y;
+    if(Math.sqrt(dx*dx+dy*dy)<AZ.r*1.3){
+      onDrop(pObj);
+    } else {
+      // 零件放回桌面
+      el.style.transform=`rotate(${pObj.rot}deg)`;
+      el.style.filter='drop-shadow(2px 5px 10px rgba(0,0,0,0.42))';
+      // 如果這個零件原本已放置在 assembly zone，移除紀錄並更新提示
+      if(currentMode==='A' && pObj.placed){
+        pObj.placed = false;
+        if(placedLayers[pObj.layer] === pObj){
+          delete placedLayers[pObj.layer];
+          updateBottomBar();
+        }
+      }
+    }
+  };
+  el.addEventListener('mousedown',  e=>{ e.preventDefault(); onStart(e.clientX,e.clientY); });
+  el.addEventListener('touchstart', e=>{ e.preventDefault(); onStart(e.touches[0].clientX,e.touches[0].clientY); },{passive:false});
+  window.addEventListener('mousemove', e=>{ if(dragging===pObj) onMove(e.clientX,e.clientY); });
+  window.addEventListener('touchmove', e=>{ if(dragging===pObj){ e.preventDefault(); onMove(e.touches[0].clientX,e.touches[0].clientY); }},{passive:false});
+  window.addEventListener('mouseup',  ()=>{ if(dragging===pObj) onEnd(); });
+  window.addEventListener('touchend', ()=>{ if(dragging===pObj) onEnd(); });
+}
+
+/* ══════════════════════════════════════════════════════════
+   MODE A — PUZZLE
+   ══════════════════════════════════════════════════════════ */
+
+// 每局開始時依難度各自打亂的題目順序
+let shuffledPool = [];
+
+/** Fisher-Yates 洗牌（使用 Math.random，每局真正隨機） */
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/** 依目前難度建立隨機題序（同難度內打亂，難度之間不混） */
+function buildShuffledPool() {
+  const d = Number(difficulty);
+  const pool = QUESTIONS.filter(q => Number(q.diff) <= d);
+  // 依難度分組，各自打亂後串接
+  const byDiff = {};
+  pool.forEach(q => {
+    if (!byDiff[q.diff]) byDiff[q.diff] = [];
+    byDiff[q.diff].push(q);
+  });
+  shuffledPool = Object.keys(byDiff)
+    .sort((a, b) => a - b)                // 難度由低到高
+    .flatMap(d => shuffle(byDiff[d]));    // 各難度組各自打亂
+}
+
+function getCurrentQ() {
+  if (!shuffledPool.length) buildShuffledPool();
+  return shuffledPool[currentQ % shuffledPool.length];
+}
+
+function pickPool(layer, answerId, extra){
+  const arr  = PARTS_DEF[layer];
+  const ans  = arr.find(p=>p.id===answerId);
+  const rest = arr.filter(p=>p.id!==answerId);
+  const rng  = seed(currentQ*71+layer.charCodeAt(0)*13+difficulty);
+  const shuffled = [...rest].sort(()=>rng()-0.5);
+  return [ans,...shuffled.slice(0,extra)].sort(()=>rng()-0.5);
+}
+
+async function spawnParts(){
+  const table = document.getElementById('table');
+  parts.forEach(p=>{ if(p.el.parentNode) p.el.parentNode.removeChild(p.el); });
+  parts = [];
+  const q = getCurrentQ();
+  const pools = {
+    body:      pickPool('body',      q.answer.body,      2),
+    cyto:      pickPool('cyto',      q.answer.cyto,      2),
+    nucleus:   pickPool('nucleus',   q.answer.nucleus,   2),
+    nucleolus: pickPool('nucleolus', q.answer.nucleolus, 1),
+    inclusion: pickPool('inclusion', q.answer.inclusion, 1),
+  };
+  const rng = seed(currentQ*37+difficulty*11+(lastWasWrong?99:0));
+  const margin  = PART_SIZE*0.6, azClear = AZ.r+PART_SIZE*0.75;
+  let idx = 0;
+
+  for (const layer of LAYER_ORDER) {
+    for (const part of pools[layer]) {
+      let px, py, tries=0;
+      do { px=margin+rng()*(tableW-margin*2); py=margin+rng()*(tableH-margin*2-60); tries++; }
+      while(Math.sqrt((px-AZ.x)**2+(py-AZ.y)**2)<azClear && tries<60);
+
+      const el = document.createElement('div');
+      el.className = 'part';
+      const rot = (rng()-0.5)*36;
+      el.style.cssText = `width:${PART_SIZE}px;height:${PART_SIZE}px;left:${px-PART_SIZE/2}px;top:${py-PART_SIZE/2}px;transform:rotate(${rot}deg);z-index:${10+idx};filter:drop-shadow(2px 5px 10px rgba(0,0,0,0.42));`;
+      if(currentMode!=='A') el.style.display='none';
+
+      // Build inner (async image load)
+      const inner = await buildPartEl(layer, part.id, q.answer.body, PART_SIZE);
+      el.appendChild(inner);
+
+      const lbl = document.createElement('div');
+      lbl.className='part-label'; lbl.textContent=part.name;
+      el.appendChild(lbl);
+      table.appendChild(el);
+
+      const pObj = {el, layer, id:part.id, x:px, y:py, rot, placed:false};
+      parts.push(pObj);
+      addDrag(el, pObj, snapToAssembly);
+      idx++;
+    }
+  }
+}
+
+function snapToAssembly(pObj){
+  if(placedLayers[pObj.layer] && placedLayers[pObj.layer]!==pObj){
+    const old = placedLayers[pObj.layer]; old.placed=false;
+    old.el.style.filter='drop-shadow(2px 5px 10px rgba(0,0,0,0.42))';
+  }
+  const li  = LAYER_ORDER.indexOf(pObj.layer);
+  const rng = seed(pObj.id.charCodeAt(0)*31+li*17+currentQ*3);
+  const jx=(rng()-0.5)*(li===0?3:11), jy=(rng()-0.5)*(li===0?3:11), jr=(rng()-0.5)*(li===0?1.5:6);
+  pObj.el.classList.add('snapping');
+  pObj.el.style.left=(AZ.x+jx-PART_SIZE/2)+'px'; pObj.el.style.top=(AZ.y+jy-PART_SIZE/2)+'px';
+  pObj.el.style.transform=`rotate(${jr}deg)`; pObj.el.style.zIndex=100+li;
+  pObj.el.style.filter='drop-shadow(1px 2px 6px rgba(0,0,0,0.28))';
+  pObj.placed=true; pObj.x=AZ.x+jx; pObj.y=AZ.y+jy;
+  placedLayers[pObj.layer]=pObj;
+  setTimeout(()=>pObj.el.classList.remove('snapping'),300);
+  updateBottomBar();
+}
+
+function updateBottomBar(){
+  const lh  = document.getElementById('layer-hint');
+  const btn = document.getElementById('submit-btn');
+
+  // 每層顯示：已放置 ✓名稱（綠色），未放置 名稱（暗色）
+  const parts_hint = LAYER_ORDER.map(l => {
+    const placed = !!placedLayers[l];
+    return placed
+      ? `<span style="color:#80E880;">✓ ${LAYER_NAMES[l]}</span>`
+      : `<span style="color:rgba(255,220,140,0.45);">${LAYER_NAMES[l]}</span>`;
+  }).join('<span style="color:rgba(255,200,80,0.25);"> ｜ </span>');
+
+  lh.innerHTML = parts_hint;
+
+  const allPlaced = LAYER_ORDER.every(l => !!placedLayers[l]);
+  btn.disabled = !allPlaced;
+}
+
+function submitAnswer(){
+  const q = getCurrentQ(); scoreTotal++;
+  const correct = LAYER_ORDER.every(l=>placedLayers[l]&&placedLayers[l].id===q.answer[l]);
+  if(correct){ scoreOk++; streak++; }
+  else       { scoreWrong++; streak = 0; }
+  updateScore();
+  parts.forEach(p=>{ p.el.style.zIndex=1; });
+  showFeedback(correct, q);
+}
+
+/* ── Feedback Panel (v4.2 — 照片輪播) ── */
+
+// 輪播狀態
+let fbPhotos   = [];   // 當題的 photos 陣列 [{src, credit}, ...]
+let fbPhotoIdx = 0;    // 目前顯示第幾張（0-based）
+
+function showFeedback(correct, q){
+  const fb = document.getElementById('feedback');
+  fb.className = 'show ' + (correct ? 'correct' : 'wrong');
+
+  document.getElementById('fb-emoji').textContent     = correct ? '🎉' : '💡';
+  document.getElementById('fb-title').textContent     = correct ? '答對了！' : '不太對，再試一次';
+  document.getElementById('fb-cell-name').textContent = q.text;
+  document.getElementById('fb-cell-sub').textContent  = q.sub;
+  document.getElementById('fb-desc').innerHTML = q.hint
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')  // XSS 防護
+    .replace(/\n/g,'<br>')   // 換行
+    .replace(/【([^】]+)】/g,'<strong style="color:rgba(255,220,140,0.95);">【$1】</strong>');  // 標題金色加粗
+
+  const fbBtn = document.getElementById('fb-btn');
+  if(correct){ fbBtn.textContent='下一題 →'; lastWasWrong=false; }
+  else        { fbBtn.textContent='重新拼組 ↩'; lastWasWrong=true; }
+
+  // 照片輪播（僅答對時顯示）
+  if(correct){
+    // 支援新格式 photos[] 和舊格式 photo 字串（向下相容）
+    if(Array.isArray(q.photos) && q.photos.length > 0){
+      fbPhotos = q.photos;
+    } else if(q.photo){
+      fbPhotos = [{ src: q.photo, credit: q.photoCredit || '' }];
+    } else {
+      fbPhotos = [];
+    }
+    fbPhotoIdx = 0;
+    fbRenderPhoto();
+  }
+}
+
+/**
+ * 渲染目前 fbPhotoIdx 對應的照片
+ */
+function fbRenderPhoto(){
+  const photo       = document.getElementById('fb-photo');
+  const placeholder = document.getElementById('fb-photo-placeholder');
+  const counter     = document.getElementById('fb-counter');
+  const credit      = document.getElementById('fb-credit');
+  const btnPrev     = document.getElementById('fb-arrow-prev');
+  const btnNext     = document.getElementById('fb-arrow-next');
+  const total       = fbPhotos.length;
+
+  if(total === 0){
+    // 無照片
+    photo.classList.remove('visible');
+    placeholder.style.display = 'flex';
+    placeholder.querySelector('div:last-child').innerHTML =
+      '照片尚未設定<br><small>在 photos/ 資料夾放入圖片後，<br>於 questions.js 的 photos 陣列填寫路徑</small>';
+    counter.textContent = '';
+    credit.textContent  = '';
+    btnPrev.style.display = 'none';
+    btnNext.style.display = 'none';
+    return;
+  }
+
+  // 計數器
+  counter.textContent = total > 1 ? `${fbPhotoIdx + 1} / ${total}` : '';
+
+  // 箭頭顯示（只有多張才顯示）
+  btnPrev.style.display = total > 1 ? 'flex' : 'none';
+  btnNext.style.display = total > 1 ? 'flex' : 'none';
+  btnPrev.disabled = (fbPhotoIdx === 0);
+  btnNext.disabled = (fbPhotoIdx === total - 1);
+
+  // 載入照片
+  const item = fbPhotos[fbPhotoIdx];
+  credit.textContent = item.credit || '';
+
+  photo.classList.remove('visible');
+  placeholder.style.display = 'none';
+
+  const tmp = new Image();
+  tmp.onload = () => {
+    photo.src = item.src;
+    // 短暫延遲讓 opacity transition 生效
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => photo.classList.add('visible'));
+    });
+    placeholder.style.display = 'none';
+  };
+  tmp.onerror = () => {
+    photo.classList.remove('visible');
+    placeholder.style.display = 'flex';
+    placeholder.querySelector('div:last-child').innerHTML =
+      `找不到照片檔案<br><small>${item.src}</small>`;
+  };
+  tmp.src = item.src;
+}
+
+/**
+ * 左右箭頭點擊
+ * @param {number} delta  -1 上一張 / +1 下一張
+ */
+function fbPhotoNav(delta){
+  const next = fbPhotoIdx + delta;
+  if(next < 0 || next >= fbPhotos.length) return;
+  // 淡出
+  document.getElementById('fb-photo').classList.remove('visible');
+  setTimeout(() => {
+    fbPhotoIdx = next;
+    fbRenderPhoto();
+  }, 160); // 略短於 transition 時間，視覺上更流暢
+}
+
+function fbAction(){
+  document.getElementById('feedback').className='';
+  if(lastWasWrong){
+    placedLayers={};
+    parts.forEach(p=>{ p.placed=false; p.el.style.filter='drop-shadow(2px 5px 10px rgba(0,0,0,0.42))'; });
+    const rng=seed(currentQ*53+77);
+    const margin=PART_SIZE*0.6, azClear=AZ.r+PART_SIZE*0.75;
+    parts.forEach((p,i)=>{
+      let px,py,tries=0;
+      do{ px=margin+rng()*(tableW-margin*2); py=margin+rng()*(tableH-margin*2-60); tries++; }
+      while(Math.sqrt((px-AZ.x)**2+(py-AZ.y)**2)<azClear && tries<60);
+      const rot=(rng()-0.5)*36; p.rot=rot; p.x=px; p.y=py;
+      p.el.style.left=(px-PART_SIZE/2)+'px'; p.el.style.top=(py-PART_SIZE/2)+'px';
+      p.el.style.transform=`rotate(${rot}deg)`; p.el.style.zIndex=10+i;
+    });
+    document.getElementById('submit-btn').disabled=true;
+    updateBottomBar();
+  } else {
+    currentQ=(currentQ+1) % shuffledPool.length;
+    placedLayers={}; lastWasWrong=false;
+    const q=getCurrentQ();
+    document.getElementById('q-text').textContent=q.text;
+    document.getElementById('q-sub').textContent=q.sub;
+    updateBottomBar();
+    spawnParts();
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   MODE B — FIND THE ERROR
+   ══════════════════════════════════════════════════════════ */
+
+/** 用 buildPartEl 疊層渲染中央血球（與模式A零件風格一致） */
+async function mbRenderCell(displayedAns, bodyId) {
+  const wrap = document.getElementById('mb-cell-wrap');
+  wrap.innerHTML = '';
+  const sz = AZ.r * 2;
+
+  // wrap 本身設成相對定位容器
+  wrap.style.width  = sz + 'px';
+  wrap.style.height = sz + 'px';
+  wrap.style.position = 'relative';
+  wrap.style.borderRadius = '50%';
+  wrap.style.overflow = 'hidden';
+
+  // 底色 canvas（防止透明背景）
+  const bgCv = document.createElement('canvas');
+  bgCv.width = sz; bgCv.height = sz;
+  bgCv.style.cssText = `position:absolute;inset:0;width:${sz}px;height:${sz}px;border-radius:50%;`;
+  const bgCtx = bgCv.getContext('2d');
+  bgCtx.beginPath(); bgCtx.arc(sz/2, sz/2, sz/2-2, 0, Math.PI*2);
+  bgCtx.fillStyle = '#2A1E14'; bgCtx.fill();
+  wrap.appendChild(bgCv);
+
+  // 依層次順序疊加每個零件
+  for (let li = 0; li < LAYER_ORDER.length; li++) {
+    const layer = LAYER_ORDER[li];
+    const partId = displayedAns[layer];
+    if (!partId) continue;
+    const def = (PARTS_DEF[layer] || []).find(p => p.id === partId);
+    if (!def || def.type === 'none') continue;
+
+    const partWrap = await buildPartEl(layer, partId, bodyId, sz);
+    partWrap.style.cssText = `position:absolute;inset:0;width:${sz}px;height:${sz}px;z-index:${10+li};pointer-events:none;`;
+    wrap.appendChild(partWrap);
+  }
+}
+
+function mbPickWrongId(layer, correctId, qIdx){
+  const arr=PARTS_DEF[layer];
+  const others=arr.filter(p=>p.id!==correctId);
+  if(!others.length) return correctId;
+  const rng=seed(qIdx*131+layer.charCodeAt(0)*53+difficulty*7);
+  return others[Math.floor(rng()*others.length)].id;
+}
+
+async function mbSpawnParts(q){
+  const table=document.getElementById('table');
+  mbParts.forEach(p=>{ if(p.el.parentNode) p.el.parentNode.removeChild(p.el); });
+  mbParts=[];
+
+  // ── 把此題的 errLayer 鎖住成區域變數 ──
+  // mbSpawnParts 是 async，await 期間 mbErrLayer 可能被下一題覆蓋；
+  // 用 const 快照後，所有 closure 都取用這個固定值。
+  const errLayer   = mbErrLayer;
+  const correctId  = q.answer[errLayer];
+  const wrongId    = mbPickWrongId(errLayer, correctId, mbQ);
+
+  const rng = seed(mbQ*59+difficulty*29+7);
+  const otherLayers = LAYER_ORDER.filter(l=>l!==errLayer&&PARTS_DEF[l].length>1);
+  const distLayer = otherLayers.length ? otherLayers[Math.floor(rng()*otherLayers.length)] : errLayer;
+  const distArr   = PARTS_DEF[distLayer];
+  const distPart  = distArr[Math.floor(rng()*distArr.length)];
+
+  let pool=[
+    {layer:errLayer,  id:correctId},
+    {layer:errLayer,  id:wrongId},
+    {layer:distLayer, id:distPart.id},
+  ];
+  const seen=new Set();
+  pool=pool.filter(item=>{ const k=item.layer+'|'+item.id; if(seen.has(k))return false; seen.add(k); return true; });
+  pool.sort(()=>rng()-0.5);
+
+  const margin=PART_SIZE*0.6, azClear=AZ.r+PART_SIZE*0.9;
+
+  for(let idx=0; idx<pool.length; idx++){
+    const item=pool[idx];
+    let px,py,tries=0;
+    do{
+      px=margin+rng()*(tableW-margin*2);
+      py=margin+rng()*(tableH-margin*2-90);
+      tries++;
+    }while(Math.sqrt((px-AZ.x)**2+(py-AZ.y)**2)<azClear && tries<80);
+
+    const el=document.createElement('div'); el.className='part';
+    const rot=(rng()-0.5)*32;
+    el.style.cssText=`width:${PART_SIZE}px;height:${PART_SIZE}px;left:${px-PART_SIZE/2}px;top:${py-PART_SIZE/2}px;transform:rotate(${rot}deg);z-index:${20+idx};filter:drop-shadow(2px 5px 10px rgba(0,0,0,0.42));`;
+    if(currentMode!=='B') el.style.display='none';
+
+    const inner = await buildPartEl(item.layer, item.id, q.answer.body, PART_SIZE);
+    el.appendChild(inner);
+
+    const partDef=PARTS_DEF[item.layer].find(p=>p.id===item.id);
+    const lbl=document.createElement('div'); lbl.className='part-label';
+    lbl.textContent=partDef?partDef.name:'?';
+    el.appendChild(lbl);
+    table.appendChild(el);
+
+    const pObj={el, layer:item.layer, id:item.id, x:px, y:py, rot};
+    mbParts.push(pObj);
+    // 傳入快照的 errLayer，不依賴外部的 mbErrLayer
+    addDrag(el, pObj, (dropped)=>mbOnDrop(dropped, q, errLayer));
+  }
+}
+
+async function mbOnDrop(pObj, q, errLayer){
+  if(mbAnswered)return;
+  const correctLayer = pObj.layer === errLayer;
+  const correctPart  = pObj.id   === q.answer[errLayer];
+
+  if(correctLayer && correctPart){
+    mbAnswered=true; mbScoreTotal++;
+    if(!mbTriedWrong){ mbScoreOk++; mbStreak++; }
+    else             { mbScoreWrong++; mbStreak = 0; }
+    updateMbScore();
+    const li=LAYER_ORDER.indexOf(pObj.layer);
+    pObj.el.classList.add('snapping');
+    pObj.el.style.left=(AZ.x-PART_SIZE/2)+'px'; pObj.el.style.top=(AZ.y-PART_SIZE/2)+'px';
+    pObj.el.style.transform='rotate(0deg)'; pObj.el.style.zIndex=300+li;
+    pObj.el.style.filter='none';
+    setTimeout(()=>{ pObj.el.classList.remove('snapping'); pObj.el.classList.add('flash-correct'); },260);
+    mbDisplayed[errLayer]=q.answer[errLayer];
+    await mbRenderCell(mbDisplayed, q.answer.body);
+    const cPart=PARTS_DEF[errLayer].find(p=>p.id===q.answer[errLayer]);
+    const wPart=PARTS_DEF[errLayer].find(p=>p.id===mbPickWrongId(errLayer, q.answer[errLayer], mbQ));
+    const hintHtml = q.hint
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/\n/g,'<br>')
+      .replace(/【([^】]+)】/g,'<strong style="color:rgba(80,40,0,0.90);">【$1】</strong>');
+    document.getElementById('mb-feedback').innerHTML=
+      `<span style="font-size:17px;font-weight:600;color:#2A6A18;">✅ 答對！</span> ${LAYER_NAMES[errLayer]}「${wPart?wPart.name:'—'}」已換成正確的「${cPart?cPart.name:'—'}」。<br><br>${hintHtml}`;
+    document.getElementById('mb-result-overlay').classList.add('show');
+    document.getElementById('mb-next-btn').style.display='inline-block';
+  } else {
+    const wrap=document.getElementById('mb-cell-wrap');
+    wrap.classList.add('flash-wrong');
+    setTimeout(()=>wrap.classList.remove('flash-wrong'),420);
+    const rng=seed(pObj.id.charCodeAt(0)*71+mbQ*13+mbScoreTotal);
+    const margin=PART_SIZE*0.6, azClear=AZ.r+PART_SIZE*0.9;
+    let bx,by,tries=0;
+    do{ bx=margin+rng()*(tableW-margin*2); by=margin+rng()*(tableH-margin*2-90); tries++; }
+    while(Math.sqrt((bx-AZ.x)**2+(by-AZ.y)**2)<azClear && tries<60);
+    pObj.el.classList.add('snapping');
+    pObj.el.style.left=(bx-PART_SIZE/2)+'px'; pObj.el.style.top=(by-PART_SIZE/2)+'px';
+    pObj.el.style.transform=`rotate(${pObj.rot}deg)`; pObj.el.style.filter='drop-shadow(2px 5px 10px rgba(0,0,0,0.42))';
+    pObj.x=bx; pObj.y=by;
+    setTimeout(()=>pObj.el.classList.remove('snapping'),300);
+    document.getElementById('mb-feedback').innerHTML =
+      correctLayer ? `❌ 層次對了，但這個零件不是正確答案，再試試！` : `❌ 不對，繼續找找看哪個才是正確的替換！`;
+    document.getElementById('mb-result-overlay').classList.add('show');
+    // 錯誤提示：2秒後自動收起，讓玩家繼續拖曳
+    setTimeout(() => {
+      document.getElementById('mb-result-overlay').classList.remove('show');
+    }, 2000);
+    mbTriedWrong=true;
+  }
+}
+
+function mbStartSession(){
+  mbQ=0; mbScoreOk=0; mbScoreTotal=0; mbScoreWrong=0; mbStreak=0;
+  mbAnswered=false; mbTriedWrong=false;
+  buildShuffledPool();
+  updateMbScore();
+  mbLoadQ();
+}
+
+async function mbLoadQ(){
+  mbAnswered=false; mbTriedWrong=false;
+  document.getElementById('mb-feedback').innerHTML='';
+  document.getElementById('mb-result-overlay').classList.remove('show');
+  document.getElementById('mb-next-btn').style.display='none';
+  document.getElementById('mb-hint').textContent='找出錯誤的零件，把正確的拖曳過去替換！';
+  const q=shuffledPool[mbQ % shuffledPool.length];
+  document.getElementById('mb-q-text').textContent=q.text;
+  document.getElementById('mb-q-sub').textContent=q.sub;
+  const rng=seed(mbQ*89+difficulty*41+3);
+
+  // 可作為「錯誤層」的條件：
+  //   1. 該層在 PARTS_DEF 有超過 1 個選項
+  //   2. 題目有指定這一層的答案
+  //   3. 答案零件不是 'none' 類型（無核仁、無包含體不適合作為找錯目標）
+  //   4. 不是 body 層（body 大小差異太明顯，題目設計上不作為錯誤層）
+  const eligible = LAYER_ORDER.filter(l => {
+    if (l === 'body') return false;
+    const parts = PARTS_DEF[l] || [];
+    if (parts.length <= 1) return false;
+    const answerId = q.answer[l];
+    if (!answerId) return false;
+    const def = parts.find(p => p.id === answerId);
+    if (!def || def.type === 'none') return false;
+    // 必須有至少一個不同的非 none 選項可以替換
+    const alternatives = parts.filter(p => p.id !== answerId && p.type !== 'none');
+    return alternatives.length > 0;
+  });
+
+  mbErrLayer = eligible[Math.floor(rng() * eligible.length)];
+  mbDisplayed = {...q.answer};
+  mbDisplayed[mbErrLayer] = mbPickWrongId(mbErrLayer, q.answer[mbErrLayer], mbQ);
+  document.getElementById('mb-cell-wrap').style.display='';
+  await mbRenderCell(mbDisplayed, q.answer.body);
+  mbSpawnParts(q);
+}
+
+function mbNextQ(){
+  mbQ=(mbQ+1) % shuffledPool.length;
+  mbLoadQ();
+}
+
+/* ══════════════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════════════ */
+window.addEventListener('load', async () => {
+  // 建立選單音樂物件
+  menuAudio = new Audio(MENU_MUSIC);
+  menuAudio.loop   = true;
+  menuAudio.volume = 1.0;
+
+  try {
+    // 嘗試直接自動播放
+    await menuAudio.play();
+    // 成功 → 淡入（從 0 開始）
+    menuAudio.volume = 0;
+    const step = 16, target = 1.0, inc = target / (800 / step);
+    const t = setInterval(() => {
+      menuAudio.volume = Math.min(target, menuAudio.volume + inc);
+      if (menuAudio.volume >= target) clearInterval(t);
+    }, step);
+  } catch (e) {
+    // 瀏覽器阻擋自動播放 → 等第一次使用者互動後再播
+    menuAudio.volume = 1.0;
+    const onFirstInteract = () => {
+      menuAudio.play().catch(() => {});
+      document.removeEventListener('click',   onFirstInteract);
+      document.removeEventListener('keydown', onFirstInteract);
+    };
+    document.addEventListener('click',   onFirstInteract);
+    document.addEventListener('keydown', onFirstInteract);
+  }
+});
+
+// resize：只在遊戲畫面中才重算
+let _resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    if (!document.getElementById('game-screen').classList.contains('slide-in')) return;
+    initTable();
+    if (currentMode === 'A') {
+      placedLayers = {};
+      updateBottomBar();
+      initRbcRef();
+      spawnParts();
+    } else {
+      mbLoadQ();
+    }
+  }, 150);
+});
+</script>
+</body>
+</html>
