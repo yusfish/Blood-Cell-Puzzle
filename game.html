@@ -47,18 +47,16 @@ html, body {
   ─────────────────────────────────────────────────────── */
 #table {
   width: 100%; height: 100%; position: relative;
-  background:
-    url('table-bg.jpg') center/cover no-repeat,
-    #7A5530;          /* 圖片載入前或不存在時的備用色 */
+  background: #0e1a17;   /* 深色實驗檯底色（canvas 載入前/失效時的備用色） */
   cursor: default;
 }
-/* wood-canvas 改為疊加紋理層：圖片存在時也保留細微木紋線條感 */
+/* bg-canvas：深色實驗檯桌面（六角紋 + 動態微粒/中央呼吸輝光），由 JS 繪製 */
 #wood-canvas {
   position: absolute; inset: 0; pointer-events: none;
-  opacity: 0.35;      /* 有自訂圖片時降低木紋透明度；純色時可改回 1 */
+  opacity: 1;
 }
 
-/* ── 小螢幕提示遮罩（< 900px 寬 或 < 560px 高） ── */
+/* ── 小螢幕提示遮罩 ── */
 #small-screen-mask {
   display: none;
   position: fixed; inset: 0; z-index: 99999;
@@ -71,7 +69,13 @@ html, body {
 #small-screen-mask h2 { font-size: 22px; font-weight: 600; color: #FFE4A0; }
 #small-screen-mask p  { font-size: 16px; color: rgba(255,220,160,0.65); line-height: 1.7; max-width: 320px; }
 
-@media (max-width: 899px), (max-height: 559px) {
+/* 顯示遮罩（封鎖）：寬 < 700，或 高 < 560，或（寬 < 900 且 高 < 900）。
+   可進場 = 寬≥700 且 高≥560 且（寬≥900 或 高≥900）。
+   既有桌機/筆電/橫向平板（≥900×560）不受影響；另納入夠高的直向平板，
+   矮的橫向手機因垂直空間不足仍封鎖。 */
+@media (max-width: 699px),
+       (max-height: 559px),
+       (max-width: 899px) and (max-height: 899px) {
   #small-screen-mask { display: flex; }
 }
 
@@ -117,8 +121,13 @@ html, body {
 #assembly-zone.glow { box-shadow: 0 0 40px 12px rgba(255,220,100,0.30); }
 
 /* ── Parts ── */
-.part { position: absolute; cursor: grab; touch-action: none; }
+.part { position: absolute; cursor: grab; touch-action: none;
+  transition: filter .14s ease; }
 .part:active { cursor: grabbing; }
+.part:not(.dragging):not(.snapping):hover {
+  z-index: 600 !important;
+  filter: drop-shadow(3px 9px 18px rgba(0,0,0,0.58)) brightness(1.07) !important;
+}
 .part.dragging {
   z-index: 1000;
   filter: drop-shadow(0 10px 22px rgba(0,0,0,0.5)) !important;
@@ -130,11 +139,23 @@ html, body {
     top    0.25s cubic-bezier(.15,1.7,.35,1),
     transform 0.25s cubic-bezier(.15,1.7,.35,1);
 }
+/* P2：零件吸入組合區的脈動回饋 */
+.part.just-snapped { border-radius: 50%; animation: snapPop 0.55s ease-out; }
+@keyframes snapPop {
+  0%   { box-shadow: 0 0 0 0 rgba(150,232,212,0.0); }
+  28%  { box-shadow: 0 0 26px 8px rgba(150,232,212,0.55); }
+  100% { box-shadow: 0 0 0 0 rgba(150,232,212,0.0); }
+}
+/* P1：零件標籤膠囊（半透明底色，任何桌面背景皆清晰） */
 .part-label {
-  position: absolute; bottom: -28px; left: 50%; transform: translateX(-50%);
-  white-space: nowrap; font-size: 20px; font-weight: 700;
-  color: rgba(255,235,170,0.95); text-shadow: 0 1px 5px rgba(0,0,0,0.85);
-  pointer-events: none; letter-spacing: 0.2px;
+  position: absolute; bottom: -32px; left: 50%; transform: translateX(-50%);
+  white-space: nowrap; font-size: 17px; font-weight: 700;
+  color: #FFE7BE; letter-spacing: 0.2px;
+  background: rgba(14,22,18,0.62); padding: 3px 11px; border-radius: 11px;
+  border: 1px solid rgba(150,220,200,0.18);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+  pointer-events: none;
 }
 
 /* ── Part Image (v4: PNG sandwiched between canvas layers) ── */
@@ -182,9 +203,10 @@ html, body {
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   gap: 16px; padding: 32px 28px;
+  overflow-y: auto;   /* 內容（含逐層說明）較長時可捲動，不被裁切 */
 }
 #feedback.correct #fb-left { background: rgba(12,45,22,0.95); }
-#feedback.wrong   #fb-left { background: rgba(50,12,12,0.95); }
+#feedback.wrong   #fb-left { background: rgba(50,12,12,0.95); justify-content: flex-start; }
 
 #fb-emoji { font-size: 52px; }
 #fb-title { font-size: 22px; font-weight: 600; color: #D8FFE0; }
@@ -214,6 +236,35 @@ html, body {
   background: #0A0E0C;   /* 深色底，讓 contain 模式的空白區乾淨 */
 }
 #feedback.wrong #fb-right { display: none; }
+
+/* ── 針對性回饋：答錯時逐層說明（細胞體/細胞質/...） ── */
+.fb-wrong-box {
+  width: 100%; max-width: 460px;
+  background: rgba(96,20,20,0.45);
+  border: 1px solid rgba(255,120,120,0.38);
+  border-radius: 12px; padding: 14px 16px; margin-bottom: 4px;
+}
+.fb-wrong-title { font-size: 17px; font-weight: 700; color: #FFC4C4; margin-bottom: 10px; }
+.fb-wrong-item { padding: 11px 0; border-top: 1px dashed rgba(255,150,150,0.22); }
+.fb-wrong-item:first-of-type { border-top: none; padding-top: 2px; }
+.fb-wrong-layer {
+  display: inline-block; font-size: 14px; font-weight: 700; color: #fff;
+  background: rgba(200,64,64,0.60); padding: 2px 12px; border-radius: 10px; margin-bottom: 7px;
+}
+.fb-wrong-cmp {
+  font-size: 15px; margin-bottom: 6px;
+  display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center;
+}
+.fb-wrong-cmp .fb-x { color: #FF9A9A; }
+.fb-wrong-cmp .fb-arrow2 { color: rgba(255,220,140,0.55); }
+.fb-wrong-cmp .fb-o { color: #9CE6A0; font-weight: 600; }
+.fb-wrong-why { font-size: 14px; line-height: 1.65; color: rgba(255,236,205,0.86); }
+.fb-full-hint-label {
+  width: 100%; max-width: 460px;
+  font-size: 13px; color: rgba(255,210,140,0.55); letter-spacing: 0.5px;
+  margin: 12px 0 8px; padding-top: 12px;
+  border-top: 1px solid rgba(255,200,80,0.16);
+}
 
 /* 照片容器：flex 佔滿上方空間 */
 #fb-photo-wrap {
@@ -722,6 +773,16 @@ html, body {
   0%,100% { box-shadow: 0 0 0 0 rgba(255,80,80,0.30); }
   50%     { box-shadow: 0 0 0 8px rgba(255,80,80,0.00); }
 }
+/* P3：最後 1 分鐘 — 更強烈的警示 */
+#quiz-timer.warn2 {
+  color: #FFFFFF; border-color: rgba(255,70,70,0.95);
+  background: rgba(150,16,16,0.95);
+  animation: timerPulse2 0.7s ease-in-out infinite;
+}
+@keyframes timerPulse2 {
+  0%,100% { box-shadow: 0 0 0 0 rgba(255,60,60,0.50); transform: scale(1); }
+  50%     { box-shadow: 0 0 0 13px rgba(255,60,60,0.00); transform: scale(1.06); }
+}
 
 /* ── 測驗模式的底部（與 A 同位置；用獨立 ID 避免衝突） ── */
 #quiz-bottom-bar {
@@ -821,7 +882,8 @@ html, body {
   display: none; flex-direction: column;
   background: linear-gradient(135deg, rgba(15,8,4,0.98), rgba(30,18,8,0.98));
   overflow-y: auto;
-  padding: 30px 40px 60px;
+  /* 寬螢幕時內容置中、限制最大寬度，避免過度拉寬難讀 */
+  padding: 32px max(40px, calc((100% - 1120px) / 2)) 60px;
 }
 #quiz-result.show { display: flex; }
 #quiz-result-header {
@@ -911,7 +973,7 @@ html, body {
 .qr-row-name .qr-en { font-size: 13px; color: rgba(255,220,140,0.50); font-style: italic; }
 .qr-row-status {
   font-size: 15px; padding: 4px 12px; border-radius: 12px;
-  font-weight: 500;
+  font-weight: 500; min-width: 78px; text-align: center;
 }
 .qr-row-status.ok    { background: rgba(60,180,80,0.22); color: #80E090; }
 .qr-row-status.wrong { background: rgba(200,60,60,0.22); color: #FF9090; }
@@ -1044,7 +1106,7 @@ html, body {
 <div id="small-screen-mask">
   <div class="mask-icon">🖥️</div>
   <h2>請使用較大的螢幕</h2>
-  <p>此遊戲需要至少 900px 寬、560px 高的螢幕才能正常操作。<br>建議使用桌機、筆電或橫向平板。</p>
+  <p>此遊戲需要較大的螢幕才能正常操作。<br>建議使用桌機、筆電,或平板(直向、橫向皆可)。</p>
 </div>
 
 <div id="app">
@@ -1626,6 +1688,7 @@ function returnToMenu() {
 }
 
 function doReturnToMenu() {
+  stopBackground();
   // 清除遊戲狀態
   document.getElementById('feedback').className = '';
   document.getElementById('mb-result-overlay').classList.remove('show');
@@ -2013,54 +2076,62 @@ function drawBubbleGlass(cv) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   PART ELEMENT BUILDER  (v4.1: 三層玻璃氣泡架構)
+   PART ELEMENT BUILDER  (v5：快取底邊框/玻璃 + PNG 存在則略過 fallback)
    ══════════════════════════════════════════════════════════
    層次由下到上：
-     [0] cvBase  — 底層 Canvas：暗邊框 + 磁石暈染
-     [1] cvFall  — Canvas fallback 繪製（PNG 存在時隱藏）
+     [0] cvBase  — 底層 Canvas：暗邊框（依尺寸快取後直接 blit）
+     [1] cvFall  — Canvas fallback 繪製（僅在 PNG 不存在時才建立）
      [2] imgEl   — PNG 圖片（有圖才加）
-     [3] cvGlass — 頂層 Canvas：玻璃氣泡高光（永遠在最上）
+     [3] cvGlass — 頂層 Canvas：玻璃氣泡高光（依尺寸快取後直接 blit）
    ══════════════════════════════════════════════════════════ */
+const _rimCache = {}, _glassCache = {};
+function getRimCanvas(sz){
+  if (_rimCache[sz]) return _rimCache[sz];
+  const c = document.createElement('canvas'); c.width = sz; c.height = sz;
+  drawBaseRim(c); _rimCache[sz] = c; return c;
+}
+function getGlassCanvas(sz){
+  if (_glassCache[sz]) return _glassCache[sz];
+  const c = document.createElement('canvas'); c.width = sz; c.height = sz;
+  drawBubbleGlass(c); _glassCache[sz] = c; return c;
+}
+
 async function buildPartEl(layer, partId, bodyId, sz) {
   const wrap = document.createElement('div');
   wrap.style.cssText = `position:relative;width:${sz}px;height:${sz}px;`;
-
   const cvStyle = `position:absolute;inset:0;width:${sz}px;height:${sz}px;pointer-events:none;`;
 
-  // ── 層 0：底層暗邊框 ──
+  // ── 層 0：底層暗邊框（blit 快取，省去重複漸層運算） ──
   const cvBase = document.createElement('canvas');
   cvBase.width = sz; cvBase.height = sz;
   cvBase.style.cssText = cvStyle + 'z-index:1;';
-  drawBaseRim(cvBase);
+  cvBase.getContext('2d').drawImage(getRimCanvas(sz), 0, 0);
   wrap.appendChild(cvBase);
 
-  // ── 層 1：Canvas fallback 繪製 ──
-  const cvFall = document.createElement('canvas');
-  cvFall.width = sz; cvFall.height = sz;
-  cvFall.style.cssText = cvStyle + 'z-index:2;';
-  drawPartOnCtx(cvFall.getContext('2d'), layer, partId, bodyId, sz);
-  wrap.appendChild(cvFall);
-
-  // ── 層 2：PNG 圖片（若存在） ──
+  // ── 層 2：PNG 圖片（若存在）；否則才畫 fallback ──
   const def = getPartDef(layer, partId);
-  if (def && def.img) {
-    const img = await loadImg(def.img);
-    if (img) {
-      // 圖片存在 → 隱藏 fallback canvas，加入 PNG
-      cvFall.style.display = 'none';
-      const imgEl = document.createElement('img');
-      imgEl.src = def.img;
-      imgEl.className = 'part-img';
-      imgEl.style.cssText += 'z-index:3;';
-      wrap.appendChild(imgEl);
-    }
+  let img = null;
+  if (def && def.img) img = await loadImg(def.img);
+  if (img) {
+    const imgEl = document.createElement('img');
+    imgEl.src = def.img;
+    imgEl.className = 'part-img';
+    imgEl.style.cssText += 'z-index:3;';
+    wrap.appendChild(imgEl);
+  } else {
+    // 只有在圖片缺失時，才執行較昂貴的 Canvas fallback 繪製
+    const cvFall = document.createElement('canvas');
+    cvFall.width = sz; cvFall.height = sz;
+    cvFall.style.cssText = cvStyle + 'z-index:2;';
+    drawPartOnCtx(cvFall.getContext('2d'), layer, partId, bodyId, sz);
+    wrap.appendChild(cvFall);
   }
 
-  // ── 層 3：頂層玻璃氣泡（永遠在最上） ──
+  // ── 層 3：頂層玻璃氣泡（blit 快取，永遠在最上） ──
   const cvGlass = document.createElement('canvas');
   cvGlass.width = sz; cvGlass.height = sz;
   cvGlass.style.cssText = cvStyle + 'z-index:10;';
-  drawBubbleGlass(cvGlass);
+  cvGlass.getContext('2d').drawImage(getGlassCanvas(sz), 0, 0);
   wrap.appendChild(cvGlass);
 
   return wrap;
@@ -2073,8 +2144,18 @@ function initTable(){
   const t = document.getElementById('table');
   tableW = t.offsetWidth; tableH = t.offsetHeight;
 
-  // 零件大小：螢幕短邊的 13%，最小 120px，最大 180px
-  PART_SIZE = Math.round(Math.max(120, Math.min(180, Math.min(tableW, tableH) * 0.13)));
+  // ── 零件大小：短邊 14%，但同時確保最壞情況（單題最多 13 個零件）能在
+  //    可用區域內不重疊地擺下；螢幕較小時自動微縮。 ──
+  const reserveTop = 72, reserveBot = 96, labelH = 30;
+  const bandH = Math.max(120, tableH - reserveTop - reserveBot - labelH);
+  const azR0  = Math.min(tableW, tableH) * 0.20;
+  const avail = Math.max(60000,
+    tableW * bandH - Math.PI * Math.pow(azR0 * 1.55, 2) - 0.04 * tableW * bandH);
+  const MAX_PARTS = 13;
+  // 每個零件約佔 (size*1.16)^2，填充效率約 0.6
+  const fit = Math.sqrt(avail * 0.60 / MAX_PARTS) / 1.16;
+  PART_SIZE = Math.round(
+    Math.max(108, Math.min(172, Math.min(Math.min(tableW, tableH) * 0.14, fit))));
 
   AZ.x = tableW/2; AZ.y = tableH/2+10; AZ.r = Math.min(tableW,tableH)*0.20;
   const az = document.getElementById('assembly-zone');
@@ -2084,71 +2165,178 @@ function initTable(){
   const mbSz = AZ.r*2;
   cw.style.width  = mbSz+'px'; cw.style.height = mbSz+'px';
   cw.style.left   = AZ.x+'px'; cw.style.top    = AZ.y+'px';
-  drawWood();
-}
-function drawWood(){
-  const cv = document.getElementById('wood-canvas');
-  cv.width = tableW; cv.height = tableH;
-  const ctx = cv.getContext('2d');
-  ctx.clearRect(0,0,tableW,tableH);
-  const rng = seed(77);
-  for(let i=0;i<80;i++){
-    const y=rng()*tableH, ctrl=rng()*24-12;
-    ctx.beginPath();ctx.moveTo(0,y);
-    ctx.quadraticCurveTo(tableW/2,y+ctrl,tableW,y+(rng()*8-4));
-    ctx.strokeStyle=`rgba(${rng()>0.5?'30,12,2':'255,210,140'},${0.07+rng()*0.13})`;
-    ctx.lineWidth=0.4+rng()*1.4;ctx.stroke();
-  }
+  setupBackground();
 }
 
 /* ══════════════════════════════════════════════════════════
-   DRAG SYSTEM
+   DARK-LAB DYNAMIC BACKGROUND  (深色實驗檯桌面)
+   概念 2（深色漸層 + 六角紋）＋ 動態 A（微粒懸浮）＋ D（中央呼吸輝光）
+   作法：靜態底圖預渲染一次到離屏 canvas，每幀只畫便宜的動態層。
+   ══════════════════════════════════════════════════════════ */
+const BG_INTENSITY = 1.5;                 // 動態強度倍率（定案）
+let _bgBase = null, _bgMotes = [], _bgAnimId = null, _bgT0 = 0;
+const _bgReduceMotion = window.matchMedia &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function _bgDrawStatic(c, W, H){
+  const g = c.createRadialGradient(W*0.5, H*0.38, 80, W*0.5, H*0.5, Math.max(W,H)*0.7);
+  g.addColorStop(0,'#182824'); g.addColorStop(0.6,'#0e1a17'); g.addColorStop(1,'#081210');
+  c.fillStyle=g; c.fillRect(0,0,W,H);
+  const top = c.createLinearGradient(0,0,0,H*0.5);
+  top.addColorStop(0,'rgba(180,230,220,0.05)'); top.addColorStop(1,'rgba(180,230,220,0)');
+  c.fillStyle=top; c.fillRect(0,0,W,H);
+  // 隱約六角紋
+  c.strokeStyle='rgba(130,210,195,0.05)'; c.lineWidth=1.2;
+  const s=46, hw=Math.sqrt(3)/2*s;
+  for(let row=-1, yy=-s; yy<H+s; row++, yy+=s*1.5){
+    const off=(row%2)?hw:0;
+    for(let xx=-s+off; xx<W+s; xx+=hw*2){
+      c.beginPath();
+      for(let k=0;k<6;k++){ const a=Math.PI/180*(60*k-30);
+        const px=xx+s*0.56*Math.cos(a), py=yy+s*0.56*Math.sin(a);
+        k?c.lineTo(px,py):c.moveTo(px,py); }
+      c.closePath(); c.stroke();
+    }
+  }
+  const v = c.createRadialGradient(W/2,H/2,Math.min(W,H)*0.4, W/2,H/2,Math.max(W,H)*0.65);
+  v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,'rgba(0,0,0,0.45)');
+  c.fillStyle=v; c.fillRect(0,0,W,H);
+}
+
+function setupBackground(){
+  const cv = document.getElementById('wood-canvas');
+  cv.width = tableW; cv.height = tableH;
+  // 預渲染靜態底圖
+  _bgBase = document.createElement('canvas');
+  _bgBase.width = tableW; _bgBase.height = tableH;
+  _bgDrawStatic(_bgBase.getContext('2d'), tableW, tableH);
+  // 建立微粒（密度依面積，數量上限 80）
+  const n = Math.max(28, Math.min(80, Math.round(tableW * tableH / 22000)));
+  const rng = seed(99);
+  _bgMotes = [];
+  for(let i=0;i<n;i++) _bgMotes.push({
+    x:rng(), y:rng(), r:0.7+rng()*2.6,
+    vx:(rng()-0.5)*0.00012, vy:(rng()-0.5)*0.00012,
+    a:0.14+rng()*0.30, ph:rng()*6.28, big:rng()>0.80
+  });
+  if(_bgReduceMotion){
+    // 尊重「減少動態」：只畫一次靜態底圖
+    cv.getContext('2d').drawImage(_bgBase, 0, 0);
+    stopBackground();
+  } else {
+    startBackground();
+  }
+}
+
+function _bgFrame(now){
+  const cv = document.getElementById('wood-canvas');
+  if(!cv || !_bgBase){ _bgAnimId=null; return; }
+  const ctx = cv.getContext('2d');
+  const W = tableW, H = tableH, t = now - _bgT0, INT = BG_INTENSITY;
+  ctx.drawImage(_bgBase, 0, 0);
+  // D — 中央呼吸輝光（對齊組合區）
+  const ga = (0.05 + 0.05 * (0.5 + 0.5*Math.sin(t/2600))) * 1.3;
+  ctx.globalCompositeOperation = 'lighter';
+  const gg = ctx.createRadialGradient(AZ.x, AZ.y, 20, AZ.x, AZ.y, Math.min(W,H)*0.42);
+  gg.addColorStop(0,'rgba(120,228,206,'+ga.toFixed(3)+')');
+  gg.addColorStop(0.65,'rgba(90,185,168,'+(ga*0.32).toFixed(3)+')');
+  gg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle = gg; ctx.fillRect(0,0,W,H);
+  // A — 微粒懸浮（疊加）
+  for(const m of _bgMotes){
+    m.x += m.vx; m.y += m.vy;
+    if(m.x<-0.02)m.x=1.02; if(m.x>1.02)m.x=-0.02;
+    if(m.y<-0.02)m.y=1.02; if(m.y>1.02)m.y=-0.02;
+    const cx=m.x*W, cy=m.y*H,
+      al=Math.min(0.85, m.a*INT*(0.5+0.5*Math.sin(t/1400+m.ph))),
+      rr=m.r*(0.85+0.28*INT);
+    if(m.big){
+      const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,rr*7);
+      bg.addColorStop(0,'rgba(150,232,214,'+(al*0.55).toFixed(3)+')');
+      bg.addColorStop(1,'rgba(150,232,214,0)');
+      ctx.fillStyle=bg; ctx.beginPath(); ctx.arc(cx,cy,rr*7,0,6.2832); ctx.fill();
+    }
+    ctx.fillStyle='rgba(170,238,221,'+al.toFixed(3)+')';
+    ctx.beginPath(); ctx.arc(cx,cy,rr,0,6.2832); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  _bgAnimId = requestAnimationFrame(_bgFrame);
+}
+
+function startBackground(){
+  if(_bgReduceMotion) return;
+  if(_bgAnimId) return;
+  _bgT0 = performance.now();
+  _bgAnimId = requestAnimationFrame(_bgFrame);
+}
+function stopBackground(){
+  if(_bgAnimId){ cancelAnimationFrame(_bgAnimId); _bgAnimId = null; }
+}
+// 分頁切到背景時暫停動畫節省資源
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden) stopBackground();
+  else if(document.getElementById('game-screen').classList.contains('slide-in')
+          && !document.getElementById('quiz-result').classList.contains('show')) startBackground();
+});
+
+/* ══════════════════════════════════════════════════════════
+   DRAG SYSTEM  (Pointer Events + pointer capture)
+   每個零件只在自己身上掛監聽，元素移除即自動回收 → 不再有監聽器洩漏；
+   同時統一滑鼠 / 觸控 / 觸控筆。
    ══════════════════════════════════════════════════════════ */
 function addDrag(el, pObj, onDrop){
-  const onStart=(ex,ey)=>{
-    if(dragging)return; dragging=pObj;
-    const rect=el.getBoundingClientRect();
-    dragOffX=ex-rect.left-PART_SIZE/2; dragOffY=ey-rect.top-PART_SIZE/2;
-    el.classList.add('dragging'); el.style.zIndex=2000;
-    el.style.transform=`rotate(${pObj.rot}deg) scale(1.07)`;
-    const zoneId=(currentMode==='A'||currentMode==='C')?'assembly-zone':'mb-cell-wrap';
-    document.getElementById(zoneId).classList.add('glow');
+  const zoneId = () => (currentMode==='A'||currentMode==='C') ? 'assembly-zone' : 'mb-cell-wrap';
+
+  const onDown = (e) => {
+    if (dragging) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;  // 滑鼠僅左鍵
+    dragging = pObj;
+    try { el.setPointerCapture(e.pointerId); } catch(_) {}
+    const rect = el.getBoundingClientRect();
+    dragOffX = e.clientX - rect.left - PART_SIZE/2;
+    dragOffY = e.clientY - rect.top  - PART_SIZE/2;
+    el.classList.remove('just-snapped');
+    el.classList.add('dragging'); el.style.zIndex = 2000;
+    el.style.transform = `rotate(${pObj.rot}deg) scale(1.07)`;
+    document.getElementById(zoneId()).classList.add('glow');
+    e.preventDefault();
   };
-  const onMove=(ex,ey)=>{
-    if(dragging!==pObj)return;
-    const tr=document.getElementById('table').getBoundingClientRect();
-    const nx=ex-tr.left-PART_SIZE/2-dragOffX, ny=ey-tr.top-PART_SIZE/2-dragOffY;
-    el.style.left=nx+'px'; el.style.top=ny+'px';
-    pObj.x=nx+PART_SIZE/2; pObj.y=ny+PART_SIZE/2;
+  const onMove = (e) => {
+    if (dragging !== pObj) return;
+    const tr = document.getElementById('table').getBoundingClientRect();
+    const nx = e.clientX - tr.left - PART_SIZE/2 - dragOffX;
+    const ny = e.clientY - tr.top  - PART_SIZE/2 - dragOffY;
+    el.style.left = nx + 'px'; el.style.top = ny + 'px';
+    pObj.x = nx + PART_SIZE/2; pObj.y = ny + PART_SIZE/2;
+    e.preventDefault();
   };
-  const onEnd=()=>{
-    if(dragging!==pObj)return; dragging=null;
+  const onUp = (e) => {
+    if (dragging !== pObj) return;
+    dragging = null;
+    try { el.releasePointerCapture(e.pointerId); } catch(_) {}
     el.classList.remove('dragging');
-    const zoneId=(currentMode==='A'||currentMode==='C')?'assembly-zone':'mb-cell-wrap';
-    document.getElementById(zoneId).classList.remove('glow');
-    const dx=pObj.x-AZ.x, dy=pObj.y-AZ.y;
-    if(Math.sqrt(dx*dx+dy*dy)<AZ.r*1.3){
+    document.getElementById(zoneId()).classList.remove('glow');
+    const dx = pObj.x - AZ.x, dy = pObj.y - AZ.y;
+    if (Math.sqrt(dx*dx + dy*dy) < AZ.r*1.3) {
       onDrop(pObj);
     } else {
-      // 零件放回桌面
-      el.style.transform=`rotate(${pObj.rot}deg)`;
-      el.style.filter='drop-shadow(2px 5px 10px rgba(0,0,0,0.42))';
-      // 如果這個零件原本已放置在 assembly zone，移除紀錄並更新提示
-      if((currentMode==='A' || currentMode==='C') && pObj.placed){
+      // 放回桌面
+      el.style.transform = `rotate(${pObj.rot}deg)`;
+      el.style.filter = 'drop-shadow(2px 5px 10px rgba(0,0,0,0.42))';
+      if ((currentMode==='A' || currentMode==='C') && pObj.placed) {
         pObj.placed = false;
-        if(placedLayers[pObj.layer] === pObj){
+        if (placedLayers[pObj.layer] === pObj) {
           delete placedLayers[pObj.layer];
           updateBottomBar();
         }
       }
     }
   };
-  el.addEventListener('mousedown',  e=>{ e.preventDefault(); onStart(e.clientX,e.clientY); });
-  el.addEventListener('touchstart', e=>{ e.preventDefault(); onStart(e.touches[0].clientX,e.touches[0].clientY); },{passive:false});
-  window.addEventListener('mousemove', e=>{ if(dragging===pObj) onMove(e.clientX,e.clientY); });
-  window.addEventListener('touchmove', e=>{ if(dragging===pObj){ e.preventDefault(); onMove(e.touches[0].clientX,e.touches[0].clientY); }},{passive:false});
-  window.addEventListener('mouseup',  ()=>{ if(dragging===pObj) onEnd(); });
-  window.addEventListener('touchend', ()=>{ if(dragging===pObj) onEnd(); });
+
+  el.addEventListener('pointerdown',   onDown);
+  el.addEventListener('pointermove',   onMove);
+  el.addEventListener('pointerup',     onUp);
+  el.addEventListener('pointercancel', onUp);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -2188,18 +2376,99 @@ function getCurrentQ() {
   return shuffledPool[currentQ % shuffledPool.length];
 }
 
+/* ── 共用：在桌面安全擺放 n 個零件，回傳各中心點 ──
+   規則：彼此保持最小間距、避開中央組合區、頂部 HUD、底部按鈕列、
+        右下紅血球徽章；並把標籤留在畫面內。擺不下時漸進放寬間距。 */
+function placeParts(n, rng){
+  rng = rng || Math.random;
+  const ps = PART_SIZE;
+  const tr = document.getElementById('table').getBoundingClientRect();
+  const rectOf = (id) => {
+    const e = document.getElementById(id);
+    if (!e) return null;
+    const cs = getComputedStyle(e);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+    const r = e.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return null;
+    return { cx:r.left-tr.left+r.width/2, cy:r.top-tr.top+r.height/2,
+             y:r.top-tr.top, h:r.height, w:r.width };
+  };
+  const hudId = currentMode==='C' ? 'quiz-hud' : currentMode==='B' ? 'mb-hud' : 'hud';
+  const barId = currentMode==='C' ? 'quiz-bottom-bar' : currentMode==='B' ? 'mb-bottom' : 'bottom-bar';
+  const hud = rectOf(hudId), bar = rectOf(barId), rbc = rectOf('rbc-ref');
+  const topSafe    = (hud ? hud.y + hud.h : 12) + ps*0.5;
+  const bottomSafe = (bar ? bar.y : tableH - 12) - ps*0.5 - 30;
+  const margin     = ps*0.55;
+  const azClear    = AZ.r + ps*0.62;
+  const rbcClear   = rbc ? Math.max(rbc.w, rbc.h)/2 + ps*0.55 : 0;
+  const baseMin    = ps*0.96;
+  const span       = Math.max(1, bottomSafe - topSafe);
+  const placed = [];
+  for (let i=0;i<n;i++){
+    let px, py, ok=false, tries=0, relax=1;
+    while(!ok && tries<700){
+      tries++; if (tries % 140 === 0) relax *= 0.9;   // 擺不下 → 逐步放寬
+      px = margin + rng()*(tableW - margin*2);
+      py = topSafe + rng()*span;
+      if (Math.hypot(px-AZ.x, py-AZ.y) < azClear) continue;
+      if (rbc && Math.hypot(px-rbc.cx, py-rbc.cy) < rbcClear) continue;
+      ok = placed.every(q => Math.hypot(px-q.x, py-q.y) >= baseMin*relax);
+    }
+    placed.push({ x:px, y:py });
+  }
+  return placed;
+}
+
+/* ── 零件池選擇（共用，以 seedVal 決定洗牌） ── */
+function pickPoolSeeded(layer, answerId, extra, seedVal){
+  const arr = PARTS_DEF[layer] || [];
+  const ans = arr.find(p => p.id === answerId);
+  if (!ans) return [];
+  const rest = arr.filter(p => p.id !== answerId);
+  const rng = seed(seedVal);
+  const shuffled = [...rest].sort(() => rng()-0.5);
+  return [ans, ...shuffled.slice(0, extra)].sort(() => rng()-0.5);
+}
 function pickPool(layer, answerId, extra){
-  const arr  = PARTS_DEF[layer];
-  const ans  = arr.find(p=>p.id===answerId);
-  const rest = arr.filter(p=>p.id!==answerId);
-  const rng  = seed(currentQ*71+layer.charCodeAt(0)*13+difficulty);
-  const shuffled = [...rest].sort(()=>rng()-0.5);
-  return [ans,...shuffled.slice(0,extra)].sort(()=>rng()-0.5);
+  return pickPoolSeeded(layer, answerId, extra,
+    currentQ*71 + layer.charCodeAt(0)*13 + difficulty);
+}
+
+/* ── 共用：依題目 pools 生成可拖曳零件（安全擺放 + 並行載圖） ── */
+async function spawnPuzzleCore(q, pools, layoutRng, hidden){
+  const table = document.getElementById('table');
+  const order = [];
+  for (const layer of LAYER_ORDER)
+    for (const part of pools[layer]) order.push({ layer, part });
+
+  const positions = placeParts(order.length, layoutRng);
+
+  // 並行建構所有零件內層（圖片載入不再逐一 await，加速進場）
+  const inners = await Promise.all(
+    order.map(o => buildPartEl(o.layer, o.part.id, q.answer.body, PART_SIZE)));
+
+  const result = [];
+  order.forEach((o, i) => {
+    const { x, y } = positions[i];
+    const rot = (layoutRng()-0.5)*30;
+    const el = document.createElement('div');
+    el.className = 'part';
+    el.style.cssText = `width:${PART_SIZE}px;height:${PART_SIZE}px;left:${x-PART_SIZE/2}px;top:${y-PART_SIZE/2}px;transform:rotate(${rot}deg);z-index:${10+i};filter:drop-shadow(2px 5px 10px rgba(0,0,0,0.42));`;
+    if (hidden) el.style.display = 'none';
+    el.appendChild(inners[i]);
+    const lbl = document.createElement('div');
+    lbl.className = 'part-label'; lbl.textContent = o.part.name;
+    el.appendChild(lbl);
+    table.appendChild(el);
+    const pObj = { el, layer:o.layer, id:o.part.id, x, y, rot, placed:false };
+    result.push(pObj);
+    addDrag(el, pObj, snapToAssembly);
+  });
+  return result;
 }
 
 async function spawnParts(){
-  const table = document.getElementById('table');
-  parts.forEach(p=>{ if(p.el.parentNode) p.el.parentNode.removeChild(p.el); });
+  parts.forEach(p => { if (p.el.parentNode) p.el.parentNode.removeChild(p.el); });
   parts = [];
   const q = getCurrentQ();
   const pools = {
@@ -2209,37 +2478,8 @@ async function spawnParts(){
     nucleolus: pickPool('nucleolus', q.answer.nucleolus, 1),
     inclusion: pickPool('inclusion', q.answer.inclusion, 1),
   };
-  const rng = seed(currentQ*37+difficulty*11+(lastWasWrong?99:0));
-  const margin  = PART_SIZE*0.6, azClear = AZ.r+PART_SIZE*0.75;
-  let idx = 0;
-
-  for (const layer of LAYER_ORDER) {
-    for (const part of pools[layer]) {
-      let px, py, tries=0;
-      do { px=margin+rng()*(tableW-margin*2); py=margin+rng()*(tableH-margin*2-60); tries++; }
-      while(Math.sqrt((px-AZ.x)**2+(py-AZ.y)**2)<azClear && tries<60);
-
-      const el = document.createElement('div');
-      el.className = 'part';
-      const rot = (rng()-0.5)*36;
-      el.style.cssText = `width:${PART_SIZE}px;height:${PART_SIZE}px;left:${px-PART_SIZE/2}px;top:${py-PART_SIZE/2}px;transform:rotate(${rot}deg);z-index:${10+idx};filter:drop-shadow(2px 5px 10px rgba(0,0,0,0.42));`;
-      if(currentMode==='B') el.style.display='none';
-
-      // Build inner (async image load)
-      const inner = await buildPartEl(layer, part.id, q.answer.body, PART_SIZE);
-      el.appendChild(inner);
-
-      const lbl = document.createElement('div');
-      lbl.className='part-label'; lbl.textContent=part.name;
-      el.appendChild(lbl);
-      table.appendChild(el);
-
-      const pObj = {el, layer, id:part.id, x:px, y:py, rot, placed:false};
-      parts.push(pObj);
-      addDrag(el, pObj, snapToAssembly);
-      idx++;
-    }
-  }
+  const layoutRng = seed(currentQ*37 + difficulty*11 + (lastWasWrong?99:0));
+  parts = await spawnPuzzleCore(q, pools, layoutRng, currentMode==='B');
 }
 
 function snapToAssembly(pObj){
@@ -2256,7 +2496,15 @@ function snapToAssembly(pObj){
   pObj.el.style.filter='drop-shadow(1px 2px 6px rgba(0,0,0,0.28))';
   pObj.placed=true; pObj.x=AZ.x+jx; pObj.y=AZ.y+jy;
   placedLayers[pObj.layer]=pObj;
-  setTimeout(()=>pObj.el.classList.remove('snapping'),300);
+  setTimeout(()=>{
+    pObj.el.classList.remove('snapping');
+    // P2：吸入回饋（脈動光環 + 組合區短暫高亮）
+    pObj.el.classList.add('just-snapped');
+    setTimeout(()=>pObj.el.classList.remove('just-snapped'), 550);
+  },260);
+  const az = document.getElementById('assembly-zone');
+  az.classList.add('glow');
+  setTimeout(()=>{ if(!dragging) az.classList.remove('glow'); }, 360);
   updateBottomBar();
 }
 
@@ -2298,6 +2546,44 @@ function submitAnswer(){
 let fbPhotos   = [];   // 當題的 photos 陣列 [{src, credit}, ...]
 let fbPhotoIdx = 0;    // 目前顯示第幾張（0-based）
 
+/* ── 針對性回饋輔助 ── */
+function _fbEsc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+/** 從 hint 取出某層的【】段落內容（header 用 LAYER_NAMES，如「細胞核」） */
+function extractHintSection(hint, header){
+  if(!hint) return '';
+  const m = hint.match(new RegExp('【'+header+'】([^【]*)'));
+  return m ? m[1].trim() : '';
+}
+function partNameOf(layer, id){
+  const d = getPartDef(layer, id);
+  return d ? d.name : (id || '—');
+}
+/** 建立「你錯在哪幾層 + 你放的 vs 正解 + 該層型態說明」的 HTML */
+function buildWrongSummary(q){
+  const wrong = LAYER_ORDER.filter(l => !placedLayers[l] || placedLayers[l].id !== q.answer[l]);
+  if(!wrong.length) return '';
+  let html = `<div class="fb-wrong-box"><div class="fb-wrong-title">❌ 答錯 ${wrong.length} 層，看看差在哪裡：</div>`;
+  wrong.forEach(l => {
+    const yourId   = placedLayers[l] ? placedLayers[l].id : null;
+    const yourName = yourId ? partNameOf(l, yourId) : '（未放置）';
+    const okName   = partNameOf(l, q.answer[l]);
+    const why      = extractHintSection(q.hint, LAYER_NAMES[l]);
+    html += `<div class="fb-wrong-item">
+        <div class="fb-wrong-layer">${_fbEsc(LAYER_NAMES[l])}</div>
+        <div class="fb-wrong-cmp">
+          <span class="fb-x">你放的：${_fbEsc(yourName)}</span>
+          <span class="fb-arrow2">→</span>
+          <span class="fb-o">正解：${_fbEsc(okName)}</span>
+        </div>
+        ${why ? `<div class="fb-wrong-why">${_fbEsc(why)}</div>` : ''}
+      </div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
 function showFeedback(correct, q){
   const fb = document.getElementById('feedback');
   fb.className = 'show ' + (correct ? 'correct' : 'wrong');
@@ -2306,10 +2592,20 @@ function showFeedback(correct, q){
   document.getElementById('fb-title').textContent     = correct ? '答對了！' : '不太對，再試一次';
   document.getElementById('fb-cell-name').textContent = q.text;
   document.getElementById('fb-cell-sub').textContent  = q.sub;
-  document.getElementById('fb-desc').innerHTML = q.hint
+
+  const hintHtml = q.hint
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')  // XSS 防護
     .replace(/\n/g,'<br>')   // 換行
     .replace(/【([^】]+)】/g,'<strong style="color:rgba(255,220,140,0.95);">【$1】</strong>');  // 標題金色加粗
+
+  // 答錯：先給逐層針對性說明，再附完整型態供參考
+  let descHtml = '';
+  if(!correct){
+    descHtml += buildWrongSummary(q);
+    descHtml += `<div class="fb-full-hint-label">完整型態參考</div>`;
+  }
+  descHtml += hintHtml;
+  document.getElementById('fb-desc').innerHTML = descHtml;
 
   const fbBtn = document.getElementById('fb-btn');
   if(correct){ fbBtn.textContent='下一題 →'; lastWasWrong=false; }
@@ -2507,24 +2803,21 @@ async function mbSpawnParts(q){
   pool=pool.filter(item=>{ const k=item.layer+'|'+item.id; if(seen.has(k))return false; seen.add(k); return true; });
   pool.sort(()=>rng()-0.5);
 
-  const margin=PART_SIZE*0.6, azClear=AZ.r+PART_SIZE*0.9;
+  // 安全擺放（彼此不重疊、避開中央細胞與 UI）+ 並行載圖
+  const positions = placeParts(pool.length, rng);
+  const inners = await Promise.all(
+    pool.map(item => buildPartEl(item.layer, item.id, q.answer.body, PART_SIZE)));
 
   for(let idx=0; idx<pool.length; idx++){
     const item=pool[idx];
-    let px,py,tries=0;
-    do{
-      px=margin+rng()*(tableW-margin*2);
-      py=margin+rng()*(tableH-margin*2-90);
-      tries++;
-    }while(Math.sqrt((px-AZ.x)**2+(py-AZ.y)**2)<azClear && tries<80);
+    const {x:px, y:py} = positions[idx];
 
     const el=document.createElement('div'); el.className='part';
-    const rot=(rng()-0.5)*32;
+    const rot=(rng()-0.5)*30;
     el.style.cssText=`width:${PART_SIZE}px;height:${PART_SIZE}px;left:${px-PART_SIZE/2}px;top:${py-PART_SIZE/2}px;transform:rotate(${rot}deg);z-index:${20+idx};filter:drop-shadow(2px 5px 10px rgba(0,0,0,0.42));`;
     if(currentMode!=='B') el.style.display='none';
 
-    const inner = await buildPartEl(item.layer, item.id, q.answer.body, PART_SIZE);
-    el.appendChild(inner);
+    el.appendChild(inners[idx]);
 
     const partDef=PARTS_DEF[item.layer].find(p=>p.id===item.id);
     const lbl=document.createElement('div'); lbl.className='part-label';
@@ -2572,10 +2865,7 @@ async function mbOnDrop(pObj, q, errLayer){
     wrap.classList.add('flash-wrong');
     setTimeout(()=>wrap.classList.remove('flash-wrong'),420);
     const rng=seed(pObj.id.charCodeAt(0)*71+mbQ*13+mbScoreTotal);
-    const margin=PART_SIZE*0.6, azClear=AZ.r+PART_SIZE*0.9;
-    let bx,by,tries=0;
-    do{ bx=margin+rng()*(tableW-margin*2); by=margin+rng()*(tableH-margin*2-90); tries++; }
-    while(Math.sqrt((bx-AZ.x)**2+(by-AZ.y)**2)<azClear && tries<60);
+    const [{x:bx, y:by}] = placeParts(1, rng);
     pObj.el.classList.add('snapping');
     pObj.el.style.left=(bx-PART_SIZE/2)+'px'; pObj.el.style.top=(by-PART_SIZE/2)+'px';
     pObj.el.style.transform=`rotate(${pObj.rot}deg)`; pObj.el.style.filter='drop-shadow(2px 5px 10px rgba(0,0,0,0.42))';
@@ -2704,6 +2994,7 @@ window.addEventListener('resize', () => {
 const QUIZ_DEFAULT_MINUTES = 30;
 const QUIZ_TOAST_MS        = 1100;   // 送出後 toast 顯示時間
 const QUIZ_WARN_SECS       = 5 * 60; // 最後 5 分鐘變紅
+const QUIZ_WARN2_SECS      = 60;     // 最後 1 分鐘加強警示
 
 const quizState = {
   active: false,
@@ -2719,6 +3010,7 @@ const quizState = {
   comment: '',
   timerId: null,
   warnApplied: false,
+  warn2Applied: false,
 };
 
 /* ── 測驗設定 Modal ── */
@@ -2821,6 +3113,10 @@ function quizUpdateTimer() {
     document.getElementById('quiz-timer').classList.add('warn');
     quizState.warnApplied = true;
   }
+  if (remain <= QUIZ_WARN2_SECS && !quizState.warn2Applied) {
+    document.getElementById('quiz-timer').classList.add('warn2');
+    quizState.warn2Applied = true;
+  }
   if (remain <= 0) {
     quizStopTimer();
     quizEnd('timeup');
@@ -2829,8 +3125,9 @@ function quizUpdateTimer() {
 
 function quizStartTimer() {
   quizStopTimer();
-  document.getElementById('quiz-timer').classList.remove('warn');
+  document.getElementById('quiz-timer').classList.remove('warn', 'warn2');
   quizState.warnApplied = false;
+  quizState.warn2Applied = false;
   document.getElementById('quiz-timer-text').textContent = quizFormatTime(quizState.totalSeconds);
   quizState.timerId = setInterval(quizUpdateTimer, 500);
 }
@@ -2864,9 +3161,8 @@ function quizLoadQuestion() {
   quizSpawnParts();
 }
 
-/** 模式 C 專用的 spawn：因為要支援不同難度的題目，重寫一個獨立版本 */
+/** 模式 C 的 spawn：共用 spawnPuzzleCore（安全擺放 + 並行載圖） */
 async function quizSpawnParts() {
-  const table = document.getElementById('table');
   parts.forEach(p => { if (p.el.parentNode) p.el.parentNode.removeChild(p.el); });
   parts = [];
   const q = quizCurrentQ();
@@ -2878,45 +3174,14 @@ async function quizSpawnParts() {
     nucleolus: quizPickPool('nucleolus', q.answer.nucleolus, 1),
     inclusion: quizPickPool('inclusion', q.answer.inclusion, 1),
   };
-  const rng    = seed(quizState.curIdx * 37 + 999);
-  const margin = PART_SIZE * 0.6, azClear = AZ.r + PART_SIZE * 0.75;
-  let idx = 0;
-  for (const layer of LAYER_ORDER) {
-    for (const part of pools[layer]) {
-      let px, py, tries = 0;
-      do {
-        px = margin + rng() * (tableW - margin * 2);
-        py = margin + rng() * (tableH - margin * 2 - 60);
-        tries++;
-      } while (Math.sqrt((px-AZ.x)**2 + (py-AZ.y)**2) < azClear && tries < 60);
-
-      const el = document.createElement('div');
-      el.className = 'part';
-      const rot = (rng() - 0.5) * 36;
-      el.style.cssText = `width:${PART_SIZE}px;height:${PART_SIZE}px;left:${px-PART_SIZE/2}px;top:${py-PART_SIZE/2}px;transform:rotate(${rot}deg);z-index:${10+idx};filter:drop-shadow(2px 5px 10px rgba(0,0,0,0.42));`;
-      const inner = await buildPartEl(layer, part.id, q.answer.body, PART_SIZE);
-      el.appendChild(inner);
-      const lbl = document.createElement('div');
-      lbl.className = 'part-label'; lbl.textContent = part.name;
-      el.appendChild(lbl);
-      table.appendChild(el);
-      const pObj = { el, layer, id: part.id, x: px, y: py, rot, placed: false };
-      parts.push(pObj);
-      addDrag(el, pObj, snapToAssembly);
-      idx++;
-    }
-  }
+  const layoutRng = seed(quizState.curIdx * 37 + 999);
+  parts = await spawnPuzzleCore(q, pools, layoutRng, false);
 }
 
 /** 模式 C 的零件池選擇：使用題目本身的種子 */
 function quizPickPool(layer, answerId, extra) {
-  const arr = (typeof PARTS_DEF !== 'undefined' && PARTS_DEF[layer]) ? PARTS_DEF[layer] : [];
-  const ans = arr.find(p => p.id === answerId);
-  if (!ans) return [];
-  const rest = arr.filter(p => p.id !== answerId);
-  const rng  = seed(quizState.curIdx * 71 + layer.charCodeAt(0) * 13 + 777);
-  const shuffled = [...rest].sort(() => rng() - 0.5);
-  return [ans, ...shuffled.slice(0, extra)].sort(() => rng() - 0.5);
+  return pickPoolSeeded(layer, answerId, extra,
+    quizState.curIdx * 71 + layer.charCodeAt(0) * 13 + 777);
 }
 
 /** 送出答案：記錄結果後不顯示對錯，直接進入下一題 */
@@ -3032,7 +3297,10 @@ function quizEnd(reason) {
   // 隱藏遊戲 HUD、計時器、底部
   document.getElementById('quiz-hud').classList.remove('show');
   document.getElementById('quiz-bottom-bar').classList.remove('show');
-  document.getElementById('quiz-timer').classList.remove('show', 'warn');
+  document.getElementById('quiz-timer').classList.remove('show', 'warn', 'warn2');
+
+  // 結果頁將覆蓋桌面 → 停止背景動畫節省資源
+  stopBackground();
 
   // 時間到時提示
   if (reason === 'timeup') {
