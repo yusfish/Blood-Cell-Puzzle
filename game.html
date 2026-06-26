@@ -601,6 +601,441 @@ html, body {
   background: rgba(255,210,130,0.35); flex-shrink: 0; transition: background 0.15s;
 }
 .music-track-btn.selected .track-dot { background: #FFD060; }
+
+/* ════════════════════════════════════════════════════════
+   MODE C — QUIZ (測驗模式)
+   ════════════════════════════════════════════════════════ */
+
+/* ── 測驗設定 Modal ── */
+#quiz-setup {
+  position: absolute; inset: 0; z-index: 600;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(8,4,2,0.78); backdrop-filter: blur(8px);
+}
+#quiz-setup.show { display: flex; }
+#quiz-setup-panel {
+  width: 460px; padding: 36px 36px 30px;
+  border-radius: 22px;
+  background: rgba(30,16,4,0.96);
+  border: 2px solid rgba(255,200,80,0.40);
+  box-shadow: 0 16px 60px rgba(0,0,0,0.65), 0 0 40px rgba(255,180,60,0.10);
+  display: flex; flex-direction: column; gap: 18px;
+}
+#quiz-setup-title {
+  font-size: 26px; font-weight: 700; color: #FFE8A0;
+  text-align: center; letter-spacing: 1px; margin-bottom: 4px;
+}
+#quiz-setup-subtitle {
+  font-size: 14px; color: rgba(255,210,130,0.65);
+  text-align: center; margin-bottom: 14px;
+}
+.quiz-field {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.quiz-field label {
+  font-size: 14px; color: rgba(255,215,140,0.85);
+  letter-spacing: 0.5px;
+}
+.quiz-field input {
+  padding: 10px 14px; border-radius: 10px; font-size: 16px;
+  border: 1.5px solid rgba(255,200,80,0.30);
+  background: rgba(20,12,4,0.75); color: #FFE4A0;
+  outline: none; transition: all 0.15s;
+  font-family: inherit;
+}
+.quiz-field input:focus {
+  border-color: rgba(255,205,80,0.75);
+  background: rgba(30,18,6,0.90);
+  box-shadow: 0 0 0 3px rgba(255,200,80,0.15);
+}
+.quiz-field input::placeholder { color: rgba(255,210,130,0.30); }
+.quiz-setup-info {
+  font-size: 13px; color: rgba(255,210,130,0.60);
+  text-align: center; padding: 10px 14px;
+  background: rgba(40,24,8,0.55); border-radius: 10px;
+  border: 1px dashed rgba(255,200,80,0.25);
+  line-height: 1.6;
+}
+.quiz-setup-btns {
+  display: flex; gap: 12px; margin-top: 8px;
+}
+.quiz-setup-btn {
+  flex: 1; padding: 12px 0; border-radius: 18px;
+  font-size: 16px; font-weight: 500; cursor: pointer;
+  border: 1.5px solid rgba(255,200,80,0.30);
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.quiz-setup-btn.cancel {
+  background: rgba(40,24,8,0.70); color: rgba(255,215,140,0.70);
+}
+.quiz-setup-btn.cancel:hover {
+  background: rgba(60,36,12,0.85); color: #FFE4A0;
+}
+.quiz-setup-btn.start {
+  background: rgba(160,100,20,0.85); color: #FFE8A0;
+  border-color: rgba(255,210,80,0.65);
+}
+.quiz-setup-btn.start:hover {
+  background: rgba(200,130,30,0.95);
+  box-shadow: 0 0 18px rgba(255,190,60,0.20);
+}
+.quiz-setup-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── 測驗 HUD（與 A/B 的 HUD 同位置） ── */
+#quiz-hud {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(40,24,8,0.86); border-radius: 22px; padding: 8px 22px;
+  display: none; align-items: center; gap: 16px; z-index: 50;
+  backdrop-filter: blur(4px); border: 1px solid rgba(255,200,80,0.18);
+  max-width: 92%;
+}
+#quiz-hud.show { display: flex; }
+#quiz-hud .hud-text { font-size: 18px; color: #FFE4A0; font-weight: 500; }
+#quiz-hud .hud-sub  { font-size: 14px; color: rgba(255,220,140,0.55); font-style: italic; }
+#quiz-progress {
+  font-size: 16px; color: rgba(255,220,140,0.80);
+  padding: 3px 12px; border-radius: 12px;
+  background: rgba(20,12,4,0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 計時器（右上角） ── */
+#quiz-timer {
+  position: absolute; top: 12px; right: 16px;
+  z-index: 200;
+  padding: 8px 18px; border-radius: 18px;
+  font-size: 20px; font-weight: 600; letter-spacing: 1px;
+  background: rgba(40,24,8,0.86); color: #FFD060;
+  border: 1.5px solid rgba(255,205,80,0.45);
+  backdrop-filter: blur(4px);
+  display: none; align-items: center; gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+#quiz-timer.show { display: flex; }
+#quiz-timer.warn {
+  color: #FF7878; border-color: rgba(255,80,80,0.70);
+  background: rgba(80,12,12,0.88);
+  animation: timerPulse 1.2s ease-in-out infinite;
+}
+@keyframes timerPulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(255,80,80,0.30); }
+  50%     { box-shadow: 0 0 0 8px rgba(255,80,80,0.00); }
+}
+
+/* ── 測驗模式的底部（與 A 同位置；用獨立 ID 避免衝突） ── */
+#quiz-bottom-bar {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 200; display: none; flex-direction: column;
+  align-items: center; gap: 8px; width: 94%; max-width: 620px;
+}
+#quiz-bottom-bar.show { display: flex; }
+#quiz-hint {
+  font-size: 16px; color: rgba(255,220,140,0.75);
+  padding: 6px 14px; border-radius: 12px;
+  background: rgba(20,12,4,0.55);
+  text-align: center; line-height: 1.6;
+}
+#quiz-submit-btn {
+  padding: 10px 26px; border-radius: 22px;
+  font-size: 17px; font-weight: 500; cursor: pointer;
+  border: 1.5px solid rgba(255,210,80,0.55);
+  background: rgba(160,100,20,0.85); color: #FFE8A0;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+#quiz-submit-btn:hover:not(:disabled) {
+  background: rgba(200,130,30,0.95);
+  box-shadow: 0 0 16px rgba(255,190,60,0.20);
+}
+#quiz-submit-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── Toast 通知 ── */
+#quiz-toast {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%,-50%) scale(0.9);
+  z-index: 9000;
+  padding: 18px 36px; border-radius: 22px;
+  font-size: 22px; font-weight: 500; letter-spacing: 1px;
+  background: rgba(20,40,22,0.92); color: #B8FFC8;
+  border: 1.5px solid rgba(120,255,140,0.40);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.55), 0 0 30px rgba(80,255,120,0.20);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+}
+#quiz-toast.show {
+  opacity: 1; transform: translate(-50%,-50%) scale(1);
+}
+
+/* ── 通用確認對話框 ── */
+#quiz-confirm {
+  position: absolute; inset: 0; z-index: 700;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(8,4,2,0.78); backdrop-filter: blur(6px);
+}
+#quiz-confirm.show { display: flex; }
+#quiz-confirm-panel {
+  width: 420px; padding: 32px 32px 26px;
+  border-radius: 20px;
+  background: rgba(30,16,4,0.96);
+  border: 2px solid rgba(255,200,80,0.40);
+  box-shadow: 0 16px 60px rgba(0,0,0,0.65);
+  display: flex; flex-direction: column; gap: 18px;
+  text-align: center;
+}
+#quiz-confirm-title { font-size: 22px; font-weight: 600; color: #FFE8A0; }
+#quiz-confirm-msg   { font-size: 16px; color: rgba(255,215,140,0.80); line-height: 1.7; }
+#quiz-confirm-btns  { display: flex; gap: 12px; }
+#quiz-confirm-btns button {
+  flex: 1; padding: 11px 0; border-radius: 16px;
+  font-size: 16px; cursor: pointer; border: 1.5px solid rgba(255,200,80,0.30);
+  transition: all 0.15s;
+  font-family: inherit;
+}
+#quiz-confirm-btns .btn-cancel {
+  background: rgba(40,24,8,0.70); color: rgba(255,215,140,0.75);
+}
+#quiz-confirm-btns .btn-cancel:hover {
+  background: rgba(60,36,12,0.88); color: #FFE4A0;
+}
+#quiz-confirm-btns .btn-ok {
+  background: rgba(160,100,20,0.85); color: #FFE8A0;
+  border-color: rgba(255,210,80,0.65);
+}
+#quiz-confirm-btns .btn-ok:hover {
+  background: rgba(200,130,30,0.95);
+}
+#quiz-confirm-btns .btn-danger {
+  background: rgba(120,30,30,0.85); color: #FFE0E0;
+  border-color: rgba(255,90,90,0.55);
+}
+#quiz-confirm-btns .btn-danger:hover {
+  background: rgba(160,40,40,0.95);
+}
+
+/* ════════════════════════════════════════════════════════
+   QUIZ RESULT SCREEN (測驗結果頁)
+   ════════════════════════════════════════════════════════ */
+#quiz-result {
+  position: absolute; inset: 0; z-index: 800;
+  display: none; flex-direction: column;
+  background: linear-gradient(135deg, rgba(15,8,4,0.98), rgba(30,18,8,0.98));
+  overflow-y: auto;
+  padding: 30px 40px 60px;
+}
+#quiz-result.show { display: flex; }
+#quiz-result-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap;
+  padding-bottom: 18px;
+  border-bottom: 1.5px solid rgba(255,200,80,0.20);
+  margin-bottom: 22px;
+}
+#qr-title-block { display: flex; flex-direction: column; gap: 4px; }
+#qr-title {
+  font-size: 30px; font-weight: 700; color: #FFE8A0;
+  letter-spacing: 1px;
+}
+#qr-student-info {
+  font-size: 15px; color: rgba(255,215,140,0.75);
+  display: flex; gap: 18px; flex-wrap: wrap;
+}
+#qr-score-block { text-align: right; }
+#qr-score {
+  font-size: 56px; font-weight: 700; color: #FFD060;
+  line-height: 1; letter-spacing: 2px;
+  text-shadow: 0 0 30px rgba(255,200,80,0.30);
+  font-variant-numeric: tabular-nums;
+}
+#qr-score-sub {
+  font-size: 14px; color: rgba(255,215,140,0.70);
+  margin-top: 6px;
+}
+#qr-stats {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.qr-stat {
+  flex: 1; min-width: 130px;
+  padding: 14px 18px; border-radius: 14px;
+  background: rgba(40,24,8,0.65);
+  border: 1px solid rgba(255,200,80,0.18);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.qr-stat-label {
+  font-size: 13px; color: rgba(255,215,140,0.65);
+  letter-spacing: 0.5px;
+}
+.qr-stat-val {
+  font-size: 22px; font-weight: 600; color: #FFE4A0;
+  font-variant-numeric: tabular-nums;
+}
+.qr-stat.correct .qr-stat-val { color: #80E090; }
+.qr-stat.wrong   .qr-stat-val { color: #FF9090; }
+.qr-stat.skip    .qr-stat-val { color: #B0B0B0; }
+
+#qr-list-title {
+  font-size: 20px; font-weight: 600; color: #FFE4A0;
+  margin-bottom: 12px; padding-left: 4px;
+}
+#qr-list {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-bottom: 28px;
+}
+.qr-row {
+  background: rgba(40,24,8,0.55);
+  border: 1px solid rgba(255,200,80,0.15);
+  border-radius: 12px;
+  transition: all 0.15s;
+  overflow: hidden;
+}
+.qr-row:hover {
+  border-color: rgba(255,200,80,0.35);
+  background: rgba(50,30,10,0.70);
+}
+.qr-row-header {
+  padding: 12px 18px;
+  display: flex; align-items: center; gap: 14px;
+  cursor: pointer;
+}
+.qr-row-no {
+  font-size: 14px; color: rgba(255,215,140,0.55);
+  font-weight: 600; min-width: 42px;
+  font-variant-numeric: tabular-nums;
+}
+.qr-row-diff { font-size: 14px; color: #FFD060; min-width: 48px; }
+.qr-row-name {
+  flex: 1; display: flex; flex-direction: column; gap: 2px;
+}
+.qr-row-name .qr-cn { font-size: 16px; color: #FFE4A0; }
+.qr-row-name .qr-en { font-size: 13px; color: rgba(255,220,140,0.50); font-style: italic; }
+.qr-row-status {
+  font-size: 15px; padding: 4px 12px; border-radius: 12px;
+  font-weight: 500;
+}
+.qr-row-status.ok    { background: rgba(60,180,80,0.22); color: #80E090; }
+.qr-row-status.wrong { background: rgba(200,60,60,0.22); color: #FF9090; }
+.qr-row-status.skip  { background: rgba(120,120,120,0.22); color: #C0C0C0; }
+.qr-row-arrow {
+  font-size: 14px; color: rgba(255,215,140,0.55);
+  transition: transform 0.20s;
+}
+.qr-row.expanded .qr-row-arrow { transform: rotate(180deg); }
+.qr-row-body {
+  display: none;
+  padding: 16px 18px 20px;
+  border-top: 1px dashed rgba(255,200,80,0.18);
+  background: rgba(20,12,4,0.45);
+}
+.qr-row.expanded .qr-row-body { display: block; }
+.qr-cell-pair {
+  display: flex; gap: 28px; justify-content: center;
+  margin-bottom: 14px; flex-wrap: wrap;
+}
+.qr-cell-col {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.qr-cell-col-label {
+  font-size: 14px; color: rgba(255,215,140,0.70);
+  letter-spacing: 0.5px;
+}
+.qr-cell-col-label.user-wrong  { color: #FF9090; }
+.qr-cell-col-label.user-ok     { color: #80E090; }
+.qr-cell-col-label.correct     { color: #FFD060; }
+.qr-cell-render {
+  width: 160px; height: 160px; border-radius: 50%;
+  position: relative; overflow: hidden;
+  background: #1A0A04;
+  border: 2px solid rgba(255,200,80,0.25);
+}
+.qr-cell-skip-placeholder {
+  width: 160px; height: 160px; border-radius: 50%;
+  background: rgba(40,24,8,0.55);
+  border: 2px dashed rgba(255,200,80,0.30);
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,215,140,0.50); font-size: 14px;
+  text-align: center; padding: 12px;
+}
+.qr-hint-box {
+  font-size: 14px; color: rgba(255,220,140,0.80);
+  background: rgba(40,24,8,0.55); border-radius: 10px;
+  padding: 10px 14px; line-height: 1.7;
+  border-left: 3px solid rgba(255,205,80,0.55);
+}
+
+/* ── 評分與回饋區 ── */
+#qr-feedback-section {
+  margin-top: 6px;
+  padding: 22px 24px;
+  border-radius: 14px;
+  background: rgba(40,24,8,0.55);
+  border: 1px solid rgba(255,200,80,0.20);
+}
+#qr-feedback-title {
+  font-size: 20px; font-weight: 600; color: #FFE4A0;
+  margin-bottom: 16px;
+}
+#qr-rating-block {
+  display: flex; align-items: center; gap: 16px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+#qr-rating-label {
+  font-size: 15px; color: rgba(255,215,140,0.85);
+}
+#qr-stars { display: flex; gap: 4px; }
+.qr-star {
+  font-size: 32px; cursor: pointer;
+  color: rgba(255,215,140,0.25);
+  transition: all 0.10s; user-select: none;
+}
+.qr-star:hover { transform: scale(1.15); }
+.qr-star.active { color: #FFD060; text-shadow: 0 0 10px rgba(255,200,80,0.50); }
+#qr-rating-num {
+  font-size: 16px; color: rgba(255,215,140,0.70);
+  font-variant-numeric: tabular-nums; min-width: 36px;
+}
+#qr-comment-block { display: flex; flex-direction: column; gap: 8px; }
+#qr-comment-block label { font-size: 15px; color: rgba(255,215,140,0.85); }
+#qr-comment {
+  width: 100%; min-height: 90px; padding: 12px 14px;
+  border-radius: 10px; font-size: 15px; line-height: 1.6;
+  border: 1.5px solid rgba(255,200,80,0.25);
+  background: rgba(20,12,4,0.75); color: #FFE4A0;
+  outline: none; resize: vertical; font-family: inherit;
+  transition: all 0.15s;
+  box-sizing: border-box;
+}
+#qr-comment:focus {
+  border-color: rgba(255,205,80,0.65);
+  background: rgba(30,18,6,0.90);
+}
+#qr-comment::placeholder { color: rgba(255,210,130,0.30); }
+
+#qr-actions {
+  display: flex; gap: 12px; justify-content: center;
+  margin-top: 22px;
+}
+.qr-action-btn {
+  padding: 12px 28px; border-radius: 22px;
+  font-size: 16px; font-weight: 500; cursor: pointer;
+  border: 1.5px solid rgba(255,200,80,0.40);
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.qr-action-btn.primary {
+  background: rgba(160,100,20,0.85); color: #FFE8A0;
+  border-color: rgba(255,210,80,0.65);
+}
+.qr-action-btn.primary:hover {
+  background: rgba(200,130,30,0.95);
+  box-shadow: 0 0 18px rgba(255,190,60,0.25);
+}
+.qr-action-btn.secondary {
+  background: rgba(40,24,8,0.70); color: rgba(255,215,140,0.80);
+}
+.qr-action-btn.secondary:hover {
+  background: rgba(60,36,12,0.88); color: #FFE4A0;
+}
 </style>
 </head>
 <body>
@@ -632,6 +1067,11 @@ html, body {
       <div class="menu-mode-icon">🔍</div>
       <div class="menu-mode-name">模式 B　找錯</div>
       <div class="menu-mode-desc">畫面中的血球有一個零件被替換成錯誤的，找出並拖曳正確的零件取代它。</div>
+    </div>
+    <div class="menu-mode-card" id="menu-card-c" onclick="menuSelectMode('C')">
+      <div class="menu-mode-icon">📝</div>
+      <div class="menu-mode-name">模式 C　測驗</div>
+      <div class="menu-mode-desc">限時測驗。使用全部題庫由易到難出題，作答後不即時顯示對錯，結束後一次檢討。</div>
     </div>
   </div>
 
@@ -671,6 +1111,31 @@ html, body {
   <a id="menu-editor-btn" href="editor.html" target="_blank">
     🧬 題庫編輯器
   </a>
+
+  <!-- 測驗設定 Modal -->
+  <div id="quiz-setup">
+    <div id="quiz-setup-panel">
+      <div id="quiz-setup-title">📝 測驗模式設定</div>
+      <div id="quiz-setup-subtitle">請填寫資料後開始作答</div>
+      <div class="quiz-field">
+        <label>姓名</label>
+        <input type="text" id="quiz-name" placeholder="請輸入您的姓名" oninput="quizSetupValidate()" maxlength="40">
+      </div>
+      <div class="quiz-field">
+        <label>員工編號</label>
+        <input type="text" id="quiz-empid" placeholder="請輸入員工編號" oninput="quizSetupValidate()" maxlength="40">
+      </div>
+      <div class="quiz-field">
+        <label>作答時限（分鐘）</label>
+        <input type="number" id="quiz-minutes" value="30" min="1" max="180" oninput="quizSetupValidate()">
+      </div>
+      <div class="quiz-setup-info" id="quiz-setup-info">本次測驗共 — 題，依難度由易到難出題，作答後不可回頭修改。</div>
+      <div class="quiz-setup-btns">
+        <button class="quiz-setup-btn cancel" onclick="quizSetupClose()">取消</button>
+        <button class="quiz-setup-btn start" id="quiz-setup-start" onclick="quizSetupStart()" disabled>開始測驗 ▶</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ══════════════════════════════════════
@@ -680,6 +1145,9 @@ html, body {
 
 <!-- 返回選單按鈕（左上角） -->
 <button id="back-btn" onclick="returnToMenu()">← 返回選單</button>
+
+<!-- 測驗模式計時器（右上角，僅模式 C 顯示） -->
+<div id="quiz-timer">⏱ <span id="quiz-timer-text">30:00</span></div>
 
 <!-- 紅血球尺寸參考徽章（右下角） -->
 <div id="rbc-ref">
@@ -757,6 +1225,30 @@ html, body {
   <div id="mb-bottom">
     <div id="mb-hint">找出錯誤的零件，把正確的拖曳過去替換！</div>
   </div>
+
+  <!-- Mode C (測驗) -->
+  <div id="quiz-hud">
+    <span class="hud-label">題目</span>
+    <span class="hud-text" id="quiz-q-text">—</span>
+    <span class="hud-sub"  id="quiz-q-sub">—</span>
+    <span id="quiz-progress">0 / 0</span>
+  </div>
+  <div id="quiz-bottom-bar">
+    <div id="quiz-hint">把零件拖曳到中央圓形區域</div>
+    <button id="quiz-submit-btn" onclick="quizSubmit()" disabled>送出答案</button>
+  </div>
+
+  <!-- 送出後的短暫 Toast -->
+  <div id="quiz-toast">✓ 已送出，進入下一題</div>
+
+  <!-- 測驗中通用確認對話框 -->
+  <div id="quiz-confirm">
+    <div id="quiz-confirm-panel">
+      <div id="quiz-confirm-title">確認</div>
+      <div id="quiz-confirm-msg">訊息</div>
+      <div id="quiz-confirm-btns"></div>
+    </div>
+  </div>
 </div><!-- /#table -->
 
 <!-- ── 模式B 答題後說明覆蓋層 ── -->
@@ -793,6 +1285,61 @@ html, body {
       <span id="fb-counter"></span>
       <span id="fb-credit"></span>
     </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     QUIZ RESULT PAGE (測驗結果頁)
+     ══════════════════════════════════════ -->
+<div id="quiz-result">
+  <div id="quiz-result-header">
+    <div id="qr-title-block">
+      <div id="qr-title">📋 測驗結果</div>
+      <div id="qr-student-info">
+        <span>姓名：<b id="qr-name">—</b></span>
+        <span>員編：<b id="qr-empid">—</b></span>
+        <span>完成時間：<b id="qr-completed">—</b></span>
+        <span>用時：<b id="qr-elapsed">—</b></span>
+      </div>
+    </div>
+    <div id="qr-score-block">
+      <div id="qr-score">—</div>
+      <div id="qr-score-sub">滿分 100</div>
+    </div>
+  </div>
+
+  <div id="qr-stats">
+    <div class="qr-stat"><span class="qr-stat-label">題數總計</span><span class="qr-stat-val" id="qr-stat-total">—</span></div>
+    <div class="qr-stat correct"><span class="qr-stat-label">答對</span><span class="qr-stat-val" id="qr-stat-ok">—</span></div>
+    <div class="qr-stat wrong"><span class="qr-stat-label">答錯</span><span class="qr-stat-val" id="qr-stat-wrong">—</span></div>
+    <div class="qr-stat skip"><span class="qr-stat-label">未作答</span><span class="qr-stat-val" id="qr-stat-skip">—</span></div>
+  </div>
+
+  <div id="qr-list-title">📑 逐題檢討（點開可看詳細對照）</div>
+  <div id="qr-list"></div>
+
+  <div id="qr-feedback-section">
+    <div id="qr-feedback-title">⭐ 整體回饋</div>
+    <div id="qr-rating-block">
+      <span id="qr-rating-label">本次測驗體驗評分：</span>
+      <div id="qr-stars">
+        <span class="qr-star" data-v="1" onclick="qrSetRating(1)">★</span>
+        <span class="qr-star" data-v="2" onclick="qrSetRating(2)">★</span>
+        <span class="qr-star" data-v="3" onclick="qrSetRating(3)">★</span>
+        <span class="qr-star" data-v="4" onclick="qrSetRating(4)">★</span>
+        <span class="qr-star" data-v="5" onclick="qrSetRating(5)">★</span>
+      </div>
+      <span id="qr-rating-num">未評分</span>
+    </div>
+    <div id="qr-comment-block">
+      <label>文字回饋（選填）</label>
+      <textarea id="qr-comment" placeholder="歡迎留下您對本次測驗的感想、建議或需要改進的地方…"></textarea>
+    </div>
+  </div>
+
+  <div id="qr-actions">
+    <button class="qr-action-btn secondary" onclick="qrBackToMenu()">回到主選單</button>
+    <button class="qr-action-btn primary" onclick="qrExportCSV()">⬇︎ 下載 CSV 結果檔</button>
   </div>
 </div>
 
@@ -920,6 +1467,18 @@ function menuSelectMode(m) {
   menuMode = m;
   document.getElementById('menu-card-a').classList.toggle('selected', m === 'A');
   document.getElementById('menu-card-b').classList.toggle('selected', m === 'B');
+  document.getElementById('menu-card-c').classList.toggle('selected', m === 'C');
+  // 模式 C 時：難度選擇無意義（測驗強制使用全部題庫），淡化顯示
+  const diffWrap = document.getElementById('menu-diff');
+  if (m === 'C') {
+    diffWrap.style.opacity = '0.35';
+    diffWrap.style.pointerEvents = 'none';
+  } else {
+    diffWrap.style.opacity = '';
+    diffWrap.style.pointerEvents = '';
+  }
+  // 模式 C 時：開始按鈕文字改為「設定測驗」
+  document.getElementById('menu-start-btn').textContent = (m === 'C') ? '設定測驗　▶' : '開始遊戲　▶';
 }
 
 function menuSelectDiff(d, btn) {
@@ -992,6 +1551,12 @@ async function initRbcRef() {
 }
 
 function startGame() {
+  // 模式 C：先開啟測驗設定 modal，不立即進入遊戲
+  if (menuMode === 'C') {
+    openQuizSetup();
+    return;
+  }
+
   difficulty  = menuDiff;
   currentMode = menuMode;
 
@@ -1041,6 +1606,26 @@ function startGame() {
 }
 
 function returnToMenu() {
+  // 測驗模式進行中 → 需要確認
+  if (currentMode === 'C' && quizState.active) {
+    quizShowConfirm({
+      title: '⚠️ 確定要放棄測驗？',
+      msg: '測驗進度與作答內容將不會保留。<br>確定要回到主選單嗎？',
+      buttons: [
+        { label: '繼續測驗', cls: 'btn-cancel', onClick: quizHideConfirm },
+        { label: '放棄並退出', cls: 'btn-danger', onClick: () => {
+          quizHideConfirm();
+          quizAbort();
+          doReturnToMenu();
+        }},
+      ],
+    });
+    return;
+  }
+  doReturnToMenu();
+}
+
+function doReturnToMenu() {
   // 清除遊戲狀態
   document.getElementById('feedback').className = '';
   document.getElementById('mb-result-overlay').classList.remove('show');
@@ -1048,6 +1633,12 @@ function returnToMenu() {
   parts = []; placedLayers = {};
   mbParts.forEach(p => { if (p.el.parentNode) p.el.parentNode.removeChild(p.el); });
   mbParts = [];
+
+  // 隱藏測驗相關 UI
+  document.getElementById('quiz-hud').classList.remove('show');
+  document.getElementById('quiz-bottom-bar').classList.remove('show');
+  document.getElementById('quiz-timer').classList.remove('show', 'warn');
+  document.getElementById('quiz-result').classList.remove('show');
 
   // 音樂切換：遊戲 → 選單
   switchToMenuMusic();
@@ -1520,7 +2111,7 @@ function addDrag(el, pObj, onDrop){
     dragOffX=ex-rect.left-PART_SIZE/2; dragOffY=ey-rect.top-PART_SIZE/2;
     el.classList.add('dragging'); el.style.zIndex=2000;
     el.style.transform=`rotate(${pObj.rot}deg) scale(1.07)`;
-    const zoneId=currentMode==='A'?'assembly-zone':'mb-cell-wrap';
+    const zoneId=(currentMode==='A'||currentMode==='C')?'assembly-zone':'mb-cell-wrap';
     document.getElementById(zoneId).classList.add('glow');
   };
   const onMove=(ex,ey)=>{
@@ -1533,7 +2124,7 @@ function addDrag(el, pObj, onDrop){
   const onEnd=()=>{
     if(dragging!==pObj)return; dragging=null;
     el.classList.remove('dragging');
-    const zoneId=currentMode==='A'?'assembly-zone':'mb-cell-wrap';
+    const zoneId=(currentMode==='A'||currentMode==='C')?'assembly-zone':'mb-cell-wrap';
     document.getElementById(zoneId).classList.remove('glow');
     const dx=pObj.x-AZ.x, dy=pObj.y-AZ.y;
     if(Math.sqrt(dx*dx+dy*dy)<AZ.r*1.3){
@@ -1543,7 +2134,7 @@ function addDrag(el, pObj, onDrop){
       el.style.transform=`rotate(${pObj.rot}deg)`;
       el.style.filter='drop-shadow(2px 5px 10px rgba(0,0,0,0.42))';
       // 如果這個零件原本已放置在 assembly zone，移除紀錄並更新提示
-      if(currentMode==='A' && pObj.placed){
+      if((currentMode==='A' || currentMode==='C') && pObj.placed){
         pObj.placed = false;
         if(placedLayers[pObj.layer] === pObj){
           delete placedLayers[pObj.layer];
@@ -1632,7 +2223,7 @@ async function spawnParts(){
       el.className = 'part';
       const rot = (rng()-0.5)*36;
       el.style.cssText = `width:${PART_SIZE}px;height:${PART_SIZE}px;left:${px-PART_SIZE/2}px;top:${py-PART_SIZE/2}px;transform:rotate(${rot}deg);z-index:${10+idx};filter:drop-shadow(2px 5px 10px rgba(0,0,0,0.42));`;
-      if(currentMode!=='A') el.style.display='none';
+      if(currentMode==='B') el.style.display='none';
 
       // Build inner (async image load)
       const inner = await buildPartEl(layer, part.id, q.answer.body, PART_SIZE);
@@ -1672,6 +2263,8 @@ function snapToAssembly(pObj){
 function updateBottomBar(){
   const lh  = document.getElementById('layer-hint');
   const btn = document.getElementById('submit-btn');
+  const qLh  = document.getElementById('quiz-hint');
+  const qBtn = document.getElementById('quiz-submit-btn');
 
   // 每層顯示：已放置 ✓名稱（綠色），未放置 名稱（暗色）
   const parts_hint = LAYER_ORDER.map(l => {
@@ -1682,9 +2275,11 @@ function updateBottomBar(){
   }).join('<span style="color:rgba(255,200,80,0.25);"> ｜ </span>');
 
   lh.innerHTML = parts_hint;
+  if (qLh) qLh.innerHTML = parts_hint;
 
   const allPlaced = LAYER_ORDER.every(l => !!placedLayers[l]);
   btn.disabled = !allPlaced;
+  if (qBtn) qBtn.disabled = !allPlaced;
 }
 
 function submitAnswer(){
@@ -2091,11 +2686,669 @@ window.addEventListener('resize', () => {
       updateBottomBar();
       initRbcRef();
       spawnParts();
+    } else if (currentMode === 'C') {
+      placedLayers = {};
+      updateBottomBar();
+      initRbcRef();
+      quizSpawnParts();
     } else {
       mbLoadQ();
     }
   }, 150);
 });
+
+/* ══════════════════════════════════════════════════════════
+   MODE C — QUIZ (測驗模式)
+   ══════════════════════════════════════════════════════════ */
+
+const QUIZ_DEFAULT_MINUTES = 30;
+const QUIZ_TOAST_MS        = 1100;   // 送出後 toast 顯示時間
+const QUIZ_WARN_SECS       = 5 * 60; // 最後 5 分鐘變紅
+
+const quizState = {
+  active: false,
+  name: '', empid: '',
+  totalSeconds: 0,   // 總時限秒數
+  startedAt: 0,      // 開始時間 timestamp
+  endedAt: 0,        // 結束時間 timestamp
+  endReason: '',     // 'finished' | 'timeup' | 'aborted'
+  questions: [],     // 本次測驗題目順序（QUESTIONS 全題庫，依難度排序）
+  curIdx: 0,         // 目前題號（0-based）
+  answers: [],       // 每題作答結果 [{placed, correct, status}]
+  rating: 0,         // 五星評分
+  comment: '',
+  timerId: null,
+  warnApplied: false,
+};
+
+/* ── 測驗設定 Modal ── */
+
+function openQuizSetup() {
+  const total = (typeof QUESTIONS !== 'undefined' && Array.isArray(QUESTIONS)) ? QUESTIONS.length : 0;
+  document.getElementById('quiz-setup-info').textContent =
+    `本次測驗共 ${total} 題（滿分 100，每題 ${total>0 ? (100/total).toFixed(2) : '—'} 分），依難度由易到難出題，作答後不可回頭修改。`;
+  document.getElementById('quiz-name').value     = '';
+  document.getElementById('quiz-empid').value    = '';
+  document.getElementById('quiz-minutes').value  = String(QUIZ_DEFAULT_MINUTES);
+  document.getElementById('quiz-setup-start').disabled = true;
+  document.getElementById('quiz-setup').classList.add('show');
+  setTimeout(()=>document.getElementById('quiz-name').focus(), 100);
+}
+
+function quizSetupClose() {
+  document.getElementById('quiz-setup').classList.remove('show');
+}
+
+function quizSetupValidate() {
+  const name  = document.getElementById('quiz-name').value.trim();
+  const empid = document.getElementById('quiz-empid').value.trim();
+  const mins  = parseInt(document.getElementById('quiz-minutes').value, 10);
+  const ok = name.length > 0 && empid.length > 0 && Number.isFinite(mins) && mins >= 1 && mins <= 180;
+  document.getElementById('quiz-setup-start').disabled = !ok;
+}
+
+function quizSetupStart() {
+  const name  = document.getElementById('quiz-name').value.trim();
+  const empid = document.getElementById('quiz-empid').value.trim();
+  const mins  = parseInt(document.getElementById('quiz-minutes').value, 10) || QUIZ_DEFAULT_MINUTES;
+
+  // 題庫依難度排序（同難度內保持原順序，給予一致的測驗體驗）
+  const pool = (typeof QUESTIONS !== 'undefined' && Array.isArray(QUESTIONS)) ? [...QUESTIONS] : [];
+  pool.sort((a, b) => (a.diff || 1) - (b.diff || 1));
+
+  if (pool.length === 0) {
+    alert('題庫為空，無法開始測驗。');
+    return;
+  }
+
+  // 初始化測驗狀態
+  quizState.active       = true;
+  quizState.name         = name;
+  quizState.empid        = empid;
+  quizState.totalSeconds = mins * 60;
+  quizState.startedAt    = Date.now();
+  quizState.endedAt      = 0;
+  quizState.endReason    = '';
+  quizState.questions    = pool;
+  quizState.curIdx       = 0;
+  quizState.answers      = pool.map(() => ({ placed: null, correct: false, status: 'skip' }));
+  quizState.rating       = 0;
+  quizState.comment      = '';
+  quizState.warnApplied  = false;
+
+  currentMode = 'C';
+  difficulty  = 3;   // 內部不使用，但確保零件池涵蓋全範圍
+
+  quizSetupClose();
+  initTable();
+  switchToGameMusic();
+  document.getElementById('menu').classList.add('slide-out-left');
+  document.getElementById('game-screen').classList.add('slide-in');
+
+  setTimeout(() => {
+    // 隱藏 A/B 的 UI，顯示 C 的 UI
+    document.getElementById('hud').style.display = 'none';
+    document.getElementById('bottom-bar').style.display = 'none';
+    document.getElementById('mb-hud').classList.remove('show');
+    document.getElementById('mb-bottom').classList.remove('show');
+    document.getElementById('mb-cell-wrap').style.display = 'none';
+    document.getElementById('assembly-zone').style.display = '';
+    document.getElementById('rbc-ref').style.display = '';
+    document.getElementById('quiz-hud').classList.add('show');
+    document.getElementById('quiz-bottom-bar').classList.add('show');
+    document.getElementById('quiz-timer').classList.add('show');
+
+    initRbcRef();
+    quizStartTimer();
+    quizLoadQuestion();
+  }, 300);
+}
+
+/* ── 計時器 ── */
+
+function quizFormatTime(secs) {
+  secs = Math.max(0, Math.floor(secs));
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function quizUpdateTimer() {
+  const elapsed = Math.floor((Date.now() - quizState.startedAt) / 1000);
+  const remain  = quizState.totalSeconds - elapsed;
+  document.getElementById('quiz-timer-text').textContent = quizFormatTime(remain);
+  if (remain <= QUIZ_WARN_SECS && !quizState.warnApplied) {
+    document.getElementById('quiz-timer').classList.add('warn');
+    quizState.warnApplied = true;
+  }
+  if (remain <= 0) {
+    quizStopTimer();
+    quizEnd('timeup');
+  }
+}
+
+function quizStartTimer() {
+  quizStopTimer();
+  document.getElementById('quiz-timer').classList.remove('warn');
+  quizState.warnApplied = false;
+  document.getElementById('quiz-timer-text').textContent = quizFormatTime(quizState.totalSeconds);
+  quizState.timerId = setInterval(quizUpdateTimer, 500);
+}
+
+function quizStopTimer() {
+  if (quizState.timerId) {
+    clearInterval(quizState.timerId);
+    quizState.timerId = null;
+  }
+}
+
+/* ── 載題與作答 ── */
+
+function quizCurrentQ() {
+  return quizState.questions[quizState.curIdx];
+}
+
+function quizLoadQuestion() {
+  const q = quizCurrentQ();
+  if (!q) return;
+  // currentQ 用於 spawnParts 的隨機種子與位置邏輯
+  currentQ = quizState.curIdx;
+  placedLayers = {};
+  lastWasWrong = false;
+  const diffStr = '⭐'.repeat(q.diff || 1);
+  document.getElementById('quiz-q-text').textContent = `${diffStr}  ${q.text}`;
+  document.getElementById('quiz-q-sub').textContent  = q.sub || '';
+  document.getElementById('quiz-progress').textContent =
+    `${quizState.curIdx + 1} / ${quizState.questions.length}`;
+  updateBottomBar();
+  quizSpawnParts();
+}
+
+/** 模式 C 專用的 spawn：因為要支援不同難度的題目，重寫一個獨立版本 */
+async function quizSpawnParts() {
+  const table = document.getElementById('table');
+  parts.forEach(p => { if (p.el.parentNode) p.el.parentNode.removeChild(p.el); });
+  parts = [];
+  const q = quizCurrentQ();
+  if (!q) return;
+  const pools = {
+    body:      quizPickPool('body',      q.answer.body,      2),
+    cyto:      quizPickPool('cyto',      q.answer.cyto,      2),
+    nucleus:   quizPickPool('nucleus',   q.answer.nucleus,   2),
+    nucleolus: quizPickPool('nucleolus', q.answer.nucleolus, 1),
+    inclusion: quizPickPool('inclusion', q.answer.inclusion, 1),
+  };
+  const rng    = seed(quizState.curIdx * 37 + 999);
+  const margin = PART_SIZE * 0.6, azClear = AZ.r + PART_SIZE * 0.75;
+  let idx = 0;
+  for (const layer of LAYER_ORDER) {
+    for (const part of pools[layer]) {
+      let px, py, tries = 0;
+      do {
+        px = margin + rng() * (tableW - margin * 2);
+        py = margin + rng() * (tableH - margin * 2 - 60);
+        tries++;
+      } while (Math.sqrt((px-AZ.x)**2 + (py-AZ.y)**2) < azClear && tries < 60);
+
+      const el = document.createElement('div');
+      el.className = 'part';
+      const rot = (rng() - 0.5) * 36;
+      el.style.cssText = `width:${PART_SIZE}px;height:${PART_SIZE}px;left:${px-PART_SIZE/2}px;top:${py-PART_SIZE/2}px;transform:rotate(${rot}deg);z-index:${10+idx};filter:drop-shadow(2px 5px 10px rgba(0,0,0,0.42));`;
+      const inner = await buildPartEl(layer, part.id, q.answer.body, PART_SIZE);
+      el.appendChild(inner);
+      const lbl = document.createElement('div');
+      lbl.className = 'part-label'; lbl.textContent = part.name;
+      el.appendChild(lbl);
+      table.appendChild(el);
+      const pObj = { el, layer, id: part.id, x: px, y: py, rot, placed: false };
+      parts.push(pObj);
+      addDrag(el, pObj, snapToAssembly);
+      idx++;
+    }
+  }
+}
+
+/** 模式 C 的零件池選擇：使用題目本身的種子 */
+function quizPickPool(layer, answerId, extra) {
+  const arr = (typeof PARTS_DEF !== 'undefined' && PARTS_DEF[layer]) ? PARTS_DEF[layer] : [];
+  const ans = arr.find(p => p.id === answerId);
+  if (!ans) return [];
+  const rest = arr.filter(p => p.id !== answerId);
+  const rng  = seed(quizState.curIdx * 71 + layer.charCodeAt(0) * 13 + 777);
+  const shuffled = [...rest].sort(() => rng() - 0.5);
+  return [ans, ...shuffled.slice(0, extra)].sort(() => rng() - 0.5);
+}
+
+/** 送出答案：記錄結果後不顯示對錯，直接進入下一題 */
+function quizSubmit() {
+  const q = quizCurrentQ();
+  if (!q) return;
+  // 必須五層都已就位
+  const allPlaced = LAYER_ORDER.every(l => placedLayers[l]);
+  if (!allPlaced) return;
+
+  // 紀錄學生作答
+  const placed = {};
+  LAYER_ORDER.forEach(l => { placed[l] = placedLayers[l].id; });
+  const correct = LAYER_ORDER.every(l => placed[l] === q.answer[l]);
+  quizState.answers[quizState.curIdx] = {
+    placed,
+    correct,
+    status: correct ? 'ok' : 'wrong',
+  };
+
+  // 顯示 toast、清場、進下一題（或結束）
+  quizShowToast('✓ 已送出，進入下一題');
+
+  // 清掉中央拼好的零件
+  parts.forEach(p => { if (p.el.parentNode) p.el.parentNode.removeChild(p.el); });
+  parts = [];
+  placedLayers = {};
+
+  const isLast = quizState.curIdx >= quizState.questions.length - 1;
+  if (isLast) {
+    // 最後一題：詢問是否交卷
+    setTimeout(() => {
+      quizShowConfirm({
+        title: '🏁 已完成最後一題',
+        msg: `共作答 ${quizState.questions.length} 題。<br>要結束測驗並查看成績嗎？`,
+        buttons: [
+          { label: '繼續等時間到', cls: 'btn-cancel', onClick: () => {
+            quizHideConfirm();
+            // 等時間到，畫面停留在空白
+            document.getElementById('quiz-q-text').textContent = '— 已完成全部題目 —';
+            document.getElementById('quiz-q-sub').textContent  = '';
+            document.getElementById('quiz-hint').textContent   = '已作答完畢，等待時間結束…';
+            document.getElementById('quiz-submit-btn').disabled = true;
+          }},
+          { label: '結束測驗交卷', cls: 'btn-ok', onClick: () => {
+            quizHideConfirm();
+            quizEnd('finished');
+          }},
+        ],
+      });
+    }, QUIZ_TOAST_MS + 100);
+  } else {
+    setTimeout(() => {
+      quizState.curIdx++;
+      quizLoadQuestion();
+    }, QUIZ_TOAST_MS);
+  }
+}
+
+/* ── Toast ── */
+
+let _quizToastTimer = null;
+function quizShowToast(text) {
+  const t = document.getElementById('quiz-toast');
+  t.textContent = text;
+  t.classList.add('show');
+  if (_quizToastTimer) clearTimeout(_quizToastTimer);
+  _quizToastTimer = setTimeout(() => {
+    t.classList.remove('show');
+  }, QUIZ_TOAST_MS);
+}
+
+/* ── 通用確認對話框 ── */
+
+function quizShowConfirm({ title, msg, buttons }) {
+  document.getElementById('quiz-confirm-title').textContent = title;
+  document.getElementById('quiz-confirm-msg').innerHTML     = msg;
+  const btnsEl = document.getElementById('quiz-confirm-btns');
+  btnsEl.innerHTML = '';
+  buttons.forEach(b => {
+    const el = document.createElement('button');
+    el.className = b.cls || 'btn-ok';
+    el.textContent = b.label;
+    el.onclick = b.onClick;
+    btnsEl.appendChild(el);
+  });
+  document.getElementById('quiz-confirm').classList.add('show');
+}
+
+function quizHideConfirm() {
+  document.getElementById('quiz-confirm').classList.remove('show');
+}
+
+/* ── 測驗結束 ── */
+
+function quizAbort() {
+  // 中途退出，僅關閉計時與狀態
+  quizStopTimer();
+  quizState.active = false;
+}
+
+function quizEnd(reason) {
+  quizStopTimer();
+  quizState.endedAt   = Date.now();
+  quizState.endReason = reason;
+  quizState.active    = false;
+
+  // 清掉拼圖零件
+  parts.forEach(p => { if (p.el.parentNode) p.el.parentNode.removeChild(p.el); });
+  parts = [];
+  placedLayers = {};
+
+  // 隱藏遊戲 HUD、計時器、底部
+  document.getElementById('quiz-hud').classList.remove('show');
+  document.getElementById('quiz-bottom-bar').classList.remove('show');
+  document.getElementById('quiz-timer').classList.remove('show', 'warn');
+
+  // 時間到時提示
+  if (reason === 'timeup') {
+    quizShowToast('⏰ 時間到，自動交卷');
+  }
+
+  // 渲染結果頁
+  setTimeout(() => {
+    qrRender();
+    document.getElementById('quiz-result').classList.add('show');
+  }, reason === 'timeup' ? QUIZ_TOAST_MS + 100 : 100);
+}
+
+/* ══════════════════════════════════════════════════════════
+   QUIZ RESULT (結果頁)
+   ══════════════════════════════════════════════════════════ */
+
+function qrRender() {
+  const total = quizState.questions.length;
+  const okCount    = quizState.answers.filter(a => a.status === 'ok').length;
+  const wrongCount = quizState.answers.filter(a => a.status === 'wrong').length;
+  const skipCount  = quizState.answers.filter(a => a.status === 'skip').length;
+
+  const perScore   = total > 0 ? (100 / total) : 0;
+  const rawScore   = okCount * perScore;
+  const finalScore = Math.round(rawScore);
+
+  // 用時
+  const elapsedSecs = Math.floor(((quizState.endedAt || Date.now()) - quizState.startedAt) / 1000);
+  const elapsedStr  = quizFormatElapsed(elapsedSecs);
+  const completedStr = quizFormatDateTime(quizState.endedAt || Date.now());
+
+  // 填入 header
+  document.getElementById('qr-name').textContent      = quizState.name;
+  document.getElementById('qr-empid').textContent     = quizState.empid;
+  document.getElementById('qr-completed').textContent = completedStr;
+  document.getElementById('qr-elapsed').textContent   = elapsedStr;
+  document.getElementById('qr-score').textContent     = String(finalScore);
+
+  document.getElementById('qr-stat-total').textContent = String(total);
+  document.getElementById('qr-stat-ok').textContent    = String(okCount);
+  document.getElementById('qr-stat-wrong').textContent = String(wrongCount);
+  document.getElementById('qr-stat-skip').textContent  = String(skipCount);
+
+  // 渲染逐題列表
+  const list = document.getElementById('qr-list');
+  list.innerHTML = '';
+  quizState.questions.forEach((q, i) => {
+    const ans = quizState.answers[i];
+    const row = document.createElement('div');
+    row.className = 'qr-row';
+
+    const statusCls = ans.status === 'ok' ? 'ok' : (ans.status === 'wrong' ? 'wrong' : 'skip');
+    const statusTxt = ans.status === 'ok' ? '✓ 全對' : (ans.status === 'wrong' ? '✗ 答錯' : '⊘ 未作答');
+    const diffStr   = '⭐'.repeat(q.diff || 1);
+
+    const header = document.createElement('div');
+    header.className = 'qr-row-header';
+    // 防 XSS：用 textContent 設定 text/sub
+    header.innerHTML =
+      `<div class="qr-row-no">Q${String(i+1).padStart(2,'0')}</div>` +
+      `<div class="qr-row-diff">${diffStr}</div>` +
+      `<div class="qr-row-name"><span class="qr-cn"></span><span class="qr-en"></span></div>` +
+      `<div class="qr-row-status ${statusCls}">${statusTxt}</div>` +
+      `<div class="qr-row-arrow">▼</div>`;
+    header.querySelector('.qr-cn').textContent = q.text || '';
+    header.querySelector('.qr-en').textContent = q.sub  || '';
+    header.onclick = () => {
+      const wasExpanded = row.classList.contains('expanded');
+      row.classList.toggle('expanded');
+      if (!wasExpanded) {
+        qrRenderRowBody(row, q, ans);
+      }
+    };
+    row.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'qr-row-body';
+    row.appendChild(body);
+
+    list.appendChild(row);
+  });
+
+  // 重置評分與回饋
+  qrSetRating(0);
+  document.getElementById('qr-comment').value = '';
+}
+
+function qrFormatLayerDiffSummary(placed, correct) {
+  return LAYER_ORDER.map(l => {
+    const yourId = placed ? placed[l] : null;
+    const okId   = correct[l];
+    const layerName = LAYER_NAMES[l];
+    if (!placed) return `${layerName}：—`;
+    return yourId === okId
+      ? `${layerName}：✓`
+      : `${layerName}：✗`;
+  }).join('　');
+}
+
+/** 渲染題目展開後的詳細卡片內容 */
+async function qrRenderRowBody(row, q, ans) {
+  const body = row.querySelector('.qr-row-body');
+  body.innerHTML = '<div style="text-align:center;color:rgba(255,215,140,0.55);padding:20px;">渲染中…</div>';
+
+  const pair = document.createElement('div');
+  pair.className = 'qr-cell-pair';
+
+  // 左：學生的答案
+  const userCol = document.createElement('div');
+  userCol.className = 'qr-cell-col';
+  const userLbl = document.createElement('div');
+  userLbl.className = 'qr-cell-col-label ' + (ans.status === 'ok' ? 'user-ok' : 'user-wrong');
+  userLbl.textContent = ans.status === 'skip' ? '你的答案：未作答' : (ans.status === 'ok' ? '你的答案（正確）' : '你的答案');
+  userCol.appendChild(userLbl);
+  if (ans.status === 'skip') {
+    const ph = document.createElement('div');
+    ph.className = 'qr-cell-skip-placeholder';
+    ph.textContent = '未作答';
+    userCol.appendChild(ph);
+  } else {
+    const userCell = document.createElement('div');
+    userCell.className = 'qr-cell-render';
+    userCol.appendChild(userCell);
+    await qrRenderCellInto(userCell, ans.placed, q.answer.body);
+  }
+  pair.appendChild(userCol);
+
+  // 右：正確答案
+  const okCol = document.createElement('div');
+  okCol.className = 'qr-cell-col';
+  const okLbl = document.createElement('div');
+  okLbl.className = 'qr-cell-col-label correct';
+  okLbl.textContent = '正確答案';
+  okCol.appendChild(okLbl);
+  const okCell = document.createElement('div');
+  okCell.className = 'qr-cell-render';
+  okCol.appendChild(okCell);
+  await qrRenderCellInto(okCell, q.answer, q.answer.body);
+  pair.appendChild(okCol);
+
+  // 每層比對摘要
+  const layerSum = document.createElement('div');
+  layerSum.style.cssText = 'text-align:center;font-size:13px;color:rgba(255,215,140,0.75);margin-bottom:12px;letter-spacing:0.5px;';
+  layerSum.textContent = ans.placed ? qrFormatLayerDiffSummary(ans.placed, q.answer) : '（未作答）';
+
+  // 形態學提示（防 XSS）
+  const hintBox = document.createElement('div');
+  hintBox.className = 'qr-hint-box';
+  const hintStrong = document.createElement('b');
+  hintStrong.textContent = '形態學提示：';
+  hintBox.appendChild(hintStrong);
+  hintBox.appendChild(document.createTextNode(q.hint || '（無提示資料）'));
+
+  body.innerHTML = '';
+  body.appendChild(pair);
+  body.appendChild(layerSum);
+  body.appendChild(hintBox);
+}
+
+/** 把一個血球渲染到指定的圓形容器內，依層次疊加 */
+async function qrRenderCellInto(container, answerMap, bodyId) {
+  const sz = 160;
+  container.style.position = 'relative';
+  // 直接複用 buildPartEl（PNG 圖片優先，向量 fallback，含底框與玻璃氣泡）
+  // 與遊戲主畫面零件渲染完全一致
+  for (const layer of LAYER_ORDER) {
+    const partId = answerMap[layer];
+    if (!partId) continue;
+    const def = getPartDef(layer, partId);
+    if (!def || def.type === 'none') continue;
+    const el = await buildPartEl(layer, partId, bodyId, sz);
+    el.style.cssText += 'position:absolute;inset:0;';
+    container.appendChild(el);
+  }
+}
+
+/* ── 評分 ── */
+
+function qrSetRating(v) {
+  quizState.rating = v;
+  document.querySelectorAll('#qr-stars .qr-star').forEach(el => {
+    const val = parseInt(el.dataset.v, 10);
+    el.classList.toggle('active', val <= v);
+  });
+  document.getElementById('qr-rating-num').textContent = v === 0 ? '未評分' : `${v} / 5`;
+}
+
+/* ── CSV 匯出 ── */
+
+function csvEscape(s) {
+  const t = (s == null) ? '' : String(s);
+  if (/[",\r\n]/.test(t)) {
+    return '"' + t.replace(/"/g, '""') + '"';
+  }
+  return t;
+}
+
+function qrExportCSV() {
+  quizState.comment = document.getElementById('qr-comment').value.trim();
+  const total = quizState.questions.length;
+  const okCount    = quizState.answers.filter(a => a.status === 'ok').length;
+  const wrongCount = quizState.answers.filter(a => a.status === 'wrong').length;
+  const skipCount  = quizState.answers.filter(a => a.status === 'skip').length;
+  const perScore   = total > 0 ? (100 / total) : 0;
+  const finalScore = Math.round(okCount * perScore);
+  const elapsedSecs = Math.floor(((quizState.endedAt || Date.now()) - quizState.startedAt) / 1000);
+  const elapsedStr  = quizFormatElapsed(elapsedSecs);
+  const completedStr = quizFormatDateTime(quizState.endedAt || Date.now());
+  const startedStr   = quizFormatDateTime(quizState.startedAt);
+  const endReasonTxt = quizState.endReason === 'timeup' ? '時間到自動結束'
+                     : quizState.endReason === 'finished' ? '完成測驗交卷'
+                     : '其他';
+
+  const lines = [];
+  lines.push(['血球拼圖測驗結果'].map(csvEscape).join(','));
+  lines.push(['']);
+  lines.push(['姓名',       csvEscape(quizState.name)].join(','));
+  lines.push(['員工編號',   csvEscape(quizState.empid)].join(','));
+  lines.push(['測驗開始時間', csvEscape(startedStr)].join(','));
+  lines.push(['測驗結束時間', csvEscape(completedStr)].join(','));
+  lines.push(['作答時間限制(分)', csvEscape(Math.floor(quizState.totalSeconds/60))].join(','));
+  lines.push(['實際用時',       csvEscape(elapsedStr)].join(','));
+  lines.push(['結束原因',       csvEscape(endReasonTxt)].join(','));
+  lines.push(['題目總數',       csvEscape(total)].join(','));
+  lines.push(['答對題數',       csvEscape(okCount)].join(','));
+  lines.push(['答錯題數',       csvEscape(wrongCount)].join(','));
+  lines.push(['未作答題數',     csvEscape(skipCount)].join(','));
+  lines.push(['每題分數',       csvEscape(perScore.toFixed(2))].join(','));
+  lines.push(['總分(滿分100)',  csvEscape(finalScore)].join(','));
+  lines.push(['整體評分(五分制)', csvEscape(quizState.rating === 0 ? '未評分' : quizState.rating)].join(','));
+  lines.push(['文字回饋',       csvEscape(quizState.comment || '（無）')].join(','));
+  lines.push(['']);
+
+  // 逐題明細
+  lines.push(['逐題明細']);
+  const layerLabels = LAYER_ORDER.map(l => LAYER_NAMES[l]);
+  const header2 = [
+    '題號', '難度', '細胞名稱(中)', '細胞名稱(英)', '結果',
+    ...layerLabels.map(n => `你的答案-${n}`),
+    ...layerLabels.map(n => `正確答案-${n}`),
+    '得分',
+  ];
+  lines.push(header2.map(csvEscape).join(','));
+
+  quizState.questions.forEach((q, i) => {
+    const ans = quizState.answers[i];
+    const resultTxt = ans.status === 'ok' ? '答對'
+                    : ans.status === 'wrong' ? '答錯' : '未作答';
+    const score = ans.status === 'ok' ? perScore.toFixed(2) : '0';
+    const yourAns = LAYER_ORDER.map(l => {
+      if (!ans.placed) return '—';
+      return qrPartName(l, ans.placed[l]);
+    });
+    const okAns = LAYER_ORDER.map(l => qrPartName(l, q.answer[l]));
+    const row = [
+      `Q${String(i+1).padStart(2,'0')}`,
+      '⭐'.repeat(q.diff || 1),
+      q.text || '',
+      q.sub || '',
+      resultTxt,
+      ...yourAns,
+      ...okAns,
+      score,
+    ];
+    lines.push(row.map(csvEscape).join(','));
+  });
+
+  // UTF-8 BOM 給 Excel
+  const csv = '\uFEFF' + lines.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const fname = `測驗結果_${sanitizeFilename(quizState.empid)}_${sanitizeFilename(quizState.name)}_${quizFormatFileDateTime(quizState.endedAt || Date.now())}.csv`;
+  const a = document.createElement('a');
+  a.href = url; a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function qrPartName(layer, partId) {
+  if (!partId) return '—';
+  const def = getPartDef(layer, partId);
+  return def ? `${def.name}(${partId})` : partId;
+}
+
+function sanitizeFilename(s) {
+  return String(s || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 30);
+}
+
+/* ── 時間格式化 ── */
+
+function quizFormatDateTime(ts) {
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function quizFormatFileDateTime(ts) {
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+function quizFormatElapsed(secs) {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m} 分 ${s} 秒`;
+}
+
+/* ── 從成績頁返回主選單 ── */
+
+function qrBackToMenu() {
+  document.getElementById('quiz-result').classList.remove('show');
+  doReturnToMenu();
+}
+
 </script>
 </body>
 </html>
